@@ -1,0 +1,10 @@
+*.har
+*.har.*
+.env*
+.DS_Store
+*.zip
+*.pem
+*.key
+*.crx
+*.log
+node_modules/
