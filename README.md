@@ -1,5 +1,19 @@
 # Desk Batch Booker
 
+> ## 🎧 Vibe coded. Use at your own risk.
+> This whole thing was **vibe coded** together with an AI, in one long, happy, caffeinated session.
+> It works on my machine, on my desk, on my Tuesday. 🪑✨
+> It has **not** been audited by a professional, only poked at by a few AI "security experts"
+> (which is fun, but not the same thing).
+>
+> - If it books the wrong desk, the wrong day, or all of the desks: that's on you, friend. 🫡
+> - If the site changes and everything breaks: that's on the site. (Or the vibes.)
+> - Read the code before you trust it. It's one file. It's friendly. It doesn't bite (much).
+> - Licensed MIT, "as is", no warranty, no refunds, no desk guarantees.
+>
+> **Be kind:** don't hoard desks you won't use. Your colleagues would also like a window seat. 🌤️
+
+
 A small Chrome extension for `uob.smartway2book.com`: pick several days and desks
 and book them all in one go. Vanilla JavaScript, no libraries, no build step.
 
@@ -71,3 +85,6 @@ Things that were learned the hard way:
 - Safeguards: every value is validated before it is sent; the desk list, names and timezones from the server are checked for shape; the reservation id used by Undo is read from the answer's `id` field and must look like an id; if the availability check fails, nothing is booked.
 - The panel is built without `innerHTML`.
 - Never commit HAR files: they contain a live session token (`*.har` is in `.gitignore`).
+
+## License
+MIT, see [LICENSE](LICENSE). Provided as is, at your own risk.
