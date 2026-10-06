@@ -18,11 +18,31 @@ A small Chrome extension for `uob.smartway2book.com`: pick several days and desk
 and book them all in one go. Vanilla JavaScript, no libraries, no build step.
 
 ## Install
-1. `chrome://extensions` → turn on **Developer mode** → **Load unpacked** → choose this folder.
-2. Open the booking site, log in, click around once (so the extension can see the session).
-3. A panel appears bottom-right.
+You need Google Chrome (or another Chromium browser such as Edge or Brave), plus `git` to download it.
 
-After changing the code: press reload on the extension, then reload the site.
+**1. Download it** (copy into a terminal; put it wherever you like, Chrome reads the folder from there, so don't delete it afterwards):
+```sh
+git clone https://github.com/nikopallas/bristol-desk-batch-booker.git
+cd bristol-desk-batch-booker
+pwd   # shows the folder path you will pick in step 2
+```
+No git? Use the green **Code → Download ZIP** button on GitHub and unpack it. (See "Before installing" below for why git is preferred.)
+
+**2. Load it into Chrome**
+1. Open `chrome://extensions` (paste it in the address bar).
+2. Turn on **Developer mode** (top right).
+3. Click **Load unpacked** and choose the `bristol-desk-batch-booker` folder.
+
+**3. Use it**
+1. Open `https://uob.smartway2book.com`, log in, and click around once (open a menu, say) so the extension can see your session.
+2. A panel appears bottom-right. If it doesn't, reload the page.
+
+**Tips**
+- **Updating:** `git pull` in the folder, press the reload (circular arrow) button on the extension's card in `chrome://extensions`, then reload the booking site.
+- **Auto check-in** only works while a booking-site tab is open and logged in (it can be a background tab). Keep one pinned.
+- Chrome may show a "disable developer mode extensions" reminder at start-up: that is normal for unpacked extensions.
+- Panel missing or desks list stuck on "Loading your desks...": reload the page and click something on it once.
+- Uninstall: `chrome://extensions` → **Remove**.
 
 ## Sharing with others
 Nothing in the code is personal: your user id, your desk list, the site's version header and each
