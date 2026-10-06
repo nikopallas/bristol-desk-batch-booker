@@ -46,6 +46,7 @@ The **–** button in the panel's corner minimises it (progress stays visible); 
 5. **Check free** shows which desk/day combinations are already taken. Nothing is booked.
 6. **Book all** skips taken desks, then books one after the other (no confirm dialog: check the "N bookings" line above the buttons first) ("Booking 2 of 5…"). **Stop** ends the run before the next booking.
 7. **Undo bookings** cancels everything this tool booked since the page was loaded.
+8. **Check-in is automatic**: every minute, while the booking page is open, everything open for check-in is checked in. **Check in now** does it immediately.
 
 ## Safety limits (on purpose)
 - At most 20 bookings per run, dates at most 60 days ahead, none in the past.

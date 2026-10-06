@@ -290,6 +290,37 @@
     return { status: response.status, text: await response.text() };
   }
 
+  // Today's reservations that can be checked in right now. Same request the site's own "my reservations" view makes.
+  async function findCheckInnable() {
+    requireSession();
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    const response = await originalFetch("/webapi/reservations/loadreservationoccurrences", {
+      method: "POST",
+      headers: { "content-type": "application/json", "smartway2-version": siteVersion, auth_token: token },
+      body: JSON.stringify({ locationids: [], range: 1, maxperday: 0, limitoverlaps: false, showonlymyreservations: true, date: midnight.toISOString(), timezone: "UTC", token: token }),
+    });
+    forgetTokenIfRejected(response.status);
+    const text = await response.text();
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${redact(text, 100)}`);
+    const now = Date.now();
+    return JSON.parse(text).filter((r) =>
+      typeof r.id === "string" && /^[A-Z0-9]{3,12}$/.test(r.id) &&
+      r.checkinenabled && !r.checkedinby && !r.terminated && !r.deleted &&
+      now >= Date.parse(r.earliestcheckin) && now < Date.parse(r.enddate)); // earliestcheckin 0001-... = no limit
+  }
+
+  async function checkIn(reservationId) {
+    requireSession();
+    const response = await originalFetch("/Services/ReservationsWS.svc/CheckIn2", {
+      method: "POST",
+      headers: { "content-type": "application/json", "smartway2-version": siteVersion },
+      body: JSON.stringify({ reservationId, occurrenceDate: toServerDate(0), latitude: 0, longitude: 0, moveStart: false, token }),
+    });
+    forgetTokenIfRejected(response.status);
+    return { status: response.status, text: await response.text() };
+  }
+
   // ---------- Section 3: validation ----------
   const MAX_BOOKINGS_PER_RUN = 20; // safety cap
   const MAX_DAYS_AHEAD = 60;
@@ -406,6 +437,7 @@
     const pickFavouritesButton = el("button", { className: "link", textContent: "Pick all favourites" });
     const bookButton = el("button", { className: "primary", textContent: "Book all", title: "Books every picked desk on every picked day" });
     const checkButton = el("button", { textContent: "Check free", title: "Shows which desks are already taken. Books nothing." });
+    const checkInButton = el("button", { textContent: "Check in now", title: "Checks in everything that is open for check-in" });
     const stopButton = el("button", { className: "stop", textContent: "Stop", hidden: true, title: "Stops before the next booking. Bookings already made stay (use Undo bookings)." });
     const undoButton = el("button", { textContent: "Undo bookings", hidden: true, title: "Cancels the bookings made by this tool since the page was loaded" });
     const planSummary = el("div", { className: "hint" });
@@ -426,7 +458,8 @@
         pickedSummary),
       section("Desk codes", tablesInput),
       el("div", { className: "section" }, planSummary,
-        el("div", { className: "row" }, checkButton, bookButton, stopButton, undoButton)),
+        el("div", { className: "row" }, checkButton, bookButton, stopButton, undoButton),
+        el("div", { className: "row" }, checkInButton), el("div", { className: "hint", textContent: "Anything open for check-in is checked in automatically every minute while this page is open." })),
       logBox
     );
     box.append(
@@ -466,7 +499,7 @@
       else if (!ready) planSummary.textContent = `${days} day(s) x ${desks} desk(s) = ${count} bookings. The limit is ${MAX_BOOKINGS_PER_RUN} per run: remove some.`;
       else planSummary.textContent = `${days} day(s) x ${desks} desk(s) = ${count} booking(s).`;
       bookButton.disabled = checkButton.disabled = busy || !ready;
-      undoButton.disabled = busy;
+      undoButton.disabled = checkInButton.disabled = busy;
     }
     const setBusy = (isBusy) => {
       busy = isBusy;
@@ -636,6 +669,33 @@
       setStatus(bookedIds.length ? `${bookedIds.length} booking(s) still not cancelled.` : "All cancelled.");
       setBusy(false);
     };
+
+    // ----- check-in -----
+    async function runCheckIn() {
+      if (!token || !userId) return log("Not connected to the site yet. Click something on the page once, then try again.", "fail");
+      for (const r of await findCheckInnable()) {
+        const { status, text } = await checkIn(r.id);
+        log(status === 200 ? `Checked in: ${r.subject}` : `Check-in failed (HTTP ${status}): ${redact(text)}`, status === 200 ? "ok" : "fail");
+        await sleep(PAUSE_BETWEEN_REQUESTS_MS);
+      }
+    }
+    checkInButton.onclick = async (event) => {
+      if (!event.isTrusted) return;
+      clearLog();
+      setBusy(true);
+      try {
+        await runCheckIn();
+        if (logBox.hidden) log("Nothing to check in right now.");
+      } catch (error) {
+        log(`Check-in failed: ${redact(error)}`, "fail");
+      } finally {
+        setBusy(false);
+      }
+    };
+    // ponytail: only runs while a booking tab is open; a failed round is just retried next minute
+    setInterval(() => {
+      if (token && userId && !busy) runCheckIn().catch(() => {});
+    }, 60000);
 
     // ----- booking -----
     let stopRequested = false;
