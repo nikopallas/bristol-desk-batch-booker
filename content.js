@@ -322,13 +322,15 @@
   }
 
   // ---------- Section 3: validation ----------
-  const MAX_BOOKINGS_PER_RUN = 20; // safety cap
-  const MAX_DAYS_AHEAD = 120;
-  const PAUSE_BETWEEN_REQUESTS_MS = 800;
+  // No cap on how many bookings or how far ahead: the site decides what it accepts, and a run stops
+  // by itself when bookings keep failing (see the booking loop).
+  const PAUSE_BETWEEN_REQUESTS_MS = 800; // normal pause between requests; grows when the site pushes back
+  const MAX_PAUSE_MS = 10000;
+  const MAX_RETRIES_WHEN_THROTTLED = 3;
 
   const splitList = (text) => [...new Set(text.split(/[\s,]+/).filter(Boolean))]; // also removes duplicates
 
-  // "2026-10-06" must be a real calendar date, today or later, and not too far ahead.
+  // "2026-10-06" must be a real calendar date, today or later.
   function checkDate(text) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return `"${text}" is not a date like 2026-10-06`;
     const [y, m, d] = text.split("-").map(Number);
@@ -340,7 +342,6 @@
     today.setHours(0, 0, 0, 0);
     const daysAhead = Math.round((real - today) / 86400000);
     if (daysAhead < 0) return `${text} is in the past`;
-    if (daysAhead > MAX_DAYS_AHEAD) return `${text} is more than ${MAX_DAYS_AHEAD} days ahead`;
     return null; // null = fine
   }
 
@@ -439,7 +440,7 @@
     const checkButton = el("button", { textContent: "Check free", title: "Shows which desks are already taken. Books nothing." });
     const checkInButton = el("button", { textContent: "Check in now", title: "Checks in everything that is open for check-in" });
     const stopButton = el("button", { className: "stop", textContent: "Stop", hidden: true, title: "Stops before the next booking. Bookings already made stay (use Undo bookings)." });
-    const undoButton = el("button", { textContent: "Undo bookings", hidden: true, title: "Cancels the bookings made by this tool since the page was loaded" });
+    const undoButton = el("button", { textContent: "Undo bookings", hidden: true, title: "Cancels the bookings made by this tool in this browser tab (also after a reload)" });
     const planSummary = el("div", { className: "hint" });
     const statusLine = el("div", { className: "status", hidden: true }); // what is happening right now, also visible while minimised
     const logBox = el("div", { className: "log", hidden: true }); // only shown once there is something to say
@@ -494,9 +495,8 @@
       const days = selectedDates.size;
       const desks = splitList(tablesInput.value).length;
       const count = days * desks;
-      const ready = count > 0 && count <= MAX_BOOKINGS_PER_RUN;
+      const ready = count > 0;
       if (count === 0) planSummary.textContent = "Pick at least one day and one desk.";
-      else if (!ready) planSummary.textContent = `${days} day(s) x ${desks} desk(s) = ${count} bookings. The limit is ${MAX_BOOKINGS_PER_RUN} per run: remove some.`;
       else planSummary.textContent = `${days} day(s) x ${desks} desk(s) = ${count} booking(s).`;
       bookButton.disabled = checkButton.disabled = busy || !ready;
       undoButton.disabled = checkInButton.disabled = busy;
@@ -638,15 +638,26 @@
     showPickedInCodesField();
 
     // ----- undo -----
-    const bookedIds = []; // reservation ids created since this page was loaded
+    // Reservation ids made by this tool in this browser tab. sessionStorage keeps them across a reload
+    // (and forgets them when the tab closes). They are only ids, never the token.
+    const BOOKED_KEY = "deskBatchBooker.booked";
+    const bookedIds = [];
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(BOOKED_KEY)) || [];
+      bookedIds.push(...saved.filter((id) => typeof id === "string" && /^[A-Za-z0-9-]{1,32}$/.test(id)));
+    } catch {} // storage blocked or broken: Undo then only works until the next reload
     const updateUndoButton = () => {
+      try {
+        sessionStorage.setItem(BOOKED_KEY, JSON.stringify(bookedIds));
+      } catch {}
       undoButton.hidden = bookedIds.length === 0;
       undoButton.textContent = `Undo bookings (${bookedIds.length})`;
     };
+    updateUndoButton(); // shows the button again after a reload if this tab still has bookings
 
     undoButton.onclick = async (event) => {
       if (!event.isTrusted) return; // ignore clicks made by scripts, only real clicks count
-      if (!nativeConfirm(`Cancel the ${bookedIds.length} booking(s) made with this tool since the page was loaded?`)) return;
+      if (!nativeConfirm(`Cancel the ${bookedIds.length} booking(s) made with this tool in this tab?`)) return;
       setBusy(true);
       while (bookedIds.length > 0) {
         setStatus(`Cancelling... ${bookedIds.length} left.`);
@@ -738,9 +749,6 @@
       }
 
       const jobs = tables.flatMap((table) => dates.map((date) => ({ table: Number(table), name: tableNames[table], date })));
-      if (jobs.length > MAX_BOOKINGS_PER_RUN) {
-        return log(`${jobs.length} bookings is too many at once (max ${MAX_BOOKINGS_PER_RUN}). Remove some days or desks.`, "fail");
-      }
       return { dates, tables, start, end, tableNames, jobs };
     }
 
@@ -797,31 +805,58 @@
         setStatus("");
         if (jobs.length === 0) return log("Nothing left to book: every desk is taken. Try other days or desks.");
 
-        // Send one request at a time. Stop at the first problem.
+        // Send one request at a time, and be gentle with the site:
+        // - if it says "too many requests" (HTTP 429) we wait longer and try the same booking again
+        //   (a 429 means the booking was NOT made, so trying again is safe);
+        // - one failed booking (say a desk taken meanwhile) is logged and the run continues,
+        //   but two failures in a row end the run, because then something is wrong.
         stopButton.hidden = false;
         stopRequested = false;
         let booked = 0;
+        let failuresInARow = 0;
+        let pause = PAUSE_BETWEEN_REQUESTS_MS;
+
+        // Returns true if the booking was made.
+        async function bookOne(job) {
+          for (let attempt = 0; attempt <= MAX_RETRIES_WHEN_THROTTLED; attempt++) {
+            try {
+              const { status, text } = await sendBooking(job.date, plan.start, plan.end, job.table, job.name);
+              const id = readReservationId(text);
+              if (status === 200 && id) {
+                log(`Booked ${job.date}  ${job.name}`, "ok");
+                bookedIds.push(id);
+                updateUndoButton();
+                return true;
+              }
+              if (status === 429 && attempt < MAX_RETRIES_WHEN_THROTTLED) {
+                pause = Math.min(pause * 2, MAX_PAUSE_MS);
+                log(`The site asks us to slow down. Waiting ${pause / 1000} s...`, "skip");
+                await sleep(pause);
+                continue;
+              }
+              const unsure = status >= 500 ? " It may still have been booked: check 'my bookings'." : "";
+              log(`Failed ${job.date}  ${job.name} (HTTP ${status}): ${redact(text)}${unsure}`, "fail");
+              return false;
+            } catch (error) {
+              log(`Failed ${job.date}  ${job.name}: ${redact(error)}. It may still have been booked: check 'my bookings'.`, "fail");
+              return false;
+            }
+          }
+          return false;
+        }
+
         for (const [i, job] of jobs.entries()) {
           if (stopRequested) { log("Stopped. The rest was not booked.", "skip"); break; }
           setStatus(`Booking ${i + 1} of ${jobs.length}...`);
-          try {
-            const { status, text } = await sendBooking(job.date, plan.start, plan.end, job.table, job.name);
-            const id = readReservationId(text);
-            if (status === 200 && id) {
-              log(`Booked ${job.date}  ${job.name}`, "ok");
-              booked++;
-              bookedIds.push(id);
-              updateUndoButton();
-            } else {
-              log(`Failed ${job.date}  ${job.name} (HTTP ${status}): ${redact(text)}`, "fail");
-              log("Stopped here. Nothing after this one was sent. Check the site, then try again.", "fail");
-              break;
-            }
-          } catch (error) {
-            log(`Failed ${job.date}  ${job.name}: ${redact(error)}. Check your connection, then try again.`, "fail");
+          if (await bookOne(job)) {
+            booked++;
+            failuresInARow = 0;
+            pause = Math.max(PAUSE_BETWEEN_REQUESTS_MS, pause / 2); // speed up again after a calm moment
+          } else if (++failuresInARow >= 2) {
+            log("Stopped: two bookings failed in a row. Nothing after this was sent. Check the site, then try again.", "fail");
             break;
           }
-          await sleep(PAUSE_BETWEEN_REQUESTS_MS);
+          await sleep(pause);
         }
         setStatus(`${booked} of ${jobs.length} booked.` + (booked ? ` "Undo bookings" cancels them.` : ""));
       } finally {

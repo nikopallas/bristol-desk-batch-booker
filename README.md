@@ -65,13 +65,13 @@ The **–** button in the panel's corner minimises it (progress stays visible); 
 4. The line above the buttons says how many bookings this makes. The buttons stay greyed out until you have picked days and desks (and while the count is over the limit).
 5. **Check free** shows which desk/day combinations are already taken. Nothing is booked.
 6. **Book all** skips taken desks, then books one after the other (no confirm dialog: check the "N bookings" line above the buttons first) ("Booking 2 of 5…"). **Stop** ends the run before the next booking.
-7. **Undo bookings** cancels everything this tool booked since the page was loaded.
+7. **Undo bookings** cancels everything this tool booked in this browser tab (it also works after a reload).
 8. **Check-in is automatic**: every minute, while the booking page is open, everything open for check-in is checked in. **Check in now** does it immediately.
 
-## Safety limits (on purpose)
-- At most 20 bookings per run, dates at most 120 days ahead, none in the past.
-- One request at a time with a short pause; the run stops at the first failed booking.
-- Booking has no confirm dialog: use **Check free** first, **Stop** to interrupt, and **Undo bookings** to cancel. Undoing does ask first.
+## Safety (on purpose)
+- There is no fixed cap on the number of bookings or on how far ahead you can book: the site decides what it accepts, and its refusal shows up in the log. Dates in the past are not allowed.
+- One request at a time with a short pause. If the site says "too many requests" the tool waits longer and retries; one failed booking is logged and the run goes on, but **two failures in a row end the run**.
+- Booking has no confirm dialog: use **Check free** first, **Stop** to interrupt, and **Undo bookings** to cancel (it keeps working after a page reload, in the same tab). Undoing does ask first.
 - Please check the university's terms before booking many desks; don't hold desks you won't use.
 
 ## How it works (`content.js`)
