@@ -48,6 +48,7 @@
   const timezoneOf = (tableId) => deskTimezones[tableId] || DEFAULT_TIMEZONE;
   let deskCountSeen = 0;
   let refreshDeskList = () => {}; // the panel replaces this once it exists
+  let refreshBookedDays = () => {}; // same: re-checks which days already have a desk of yours
 
   function inspectRequest(url, body) {
     if (typeof body !== "string" || !isSiteApiUrl(url)) return;
@@ -75,6 +76,7 @@
       .then((names) => {
         Object.assign(deskNames, names);
         refreshDeskList();
+        refreshBookedDays(); // the session is known now, so we can ask for your bookings
       })
       .catch((error) => console.log("[Desk Batch Booker] could not load desk names:", redact(error)));
   }
@@ -267,6 +269,30 @@
     return new Set(JSON.parse(text).map((row) => String(row.locationid)));
   }
 
+  // Which desk (name) do you have on one day, or null? Same request the site's own agenda makes
+  // ("my reservations", range 1 = one day). dayStart is local midnight of that day as an ISO time.
+  async function loadMyDeskOfDay(dayStart) {
+    requireSession();
+    const response = await originalFetch("/webapi/reservations/loadreservationoccurrences", {
+      method: "POST",
+      headers: { "content-type": "application/json", "smartway2-version": siteVersion, auth_token: token },
+      body: JSON.stringify({
+        locationids: [], range: 1, maxperday: 0, limitoverlaps: false,
+        showonlymyreservations: true, date: dayStart, timezone: "UTC",
+      }),
+    });
+    forgetTokenIfRejected(response.status);
+    const text = await response.text();
+    if (!response.ok) throw new Error(`could not load your bookings: HTTP ${response.status}`);
+    for (const reservation of JSON.parse(text)) {
+      if (reservation.deleted || !Array.isArray(reservation.locations)) continue;
+      // Only desks count (not meeting rooms etc.): the location must be one of our known desks.
+      const deskCode = reservation.locations.find((code) => deskNames[code]);
+      if (deskCode !== undefined) return deskNames[deskCode];
+    }
+    return null;
+  }
+
   // The id of the new reservation is the top-level "id" of the Save6 answer (e.g. "E8ZYS").
   // Anything that doesn't look like an id is refused, so Undo can never be pointed at something else.
   function readReservationId(text) {
@@ -413,7 +439,10 @@
     .weekday:hover:not(:disabled) { color:var(--accent); filter:none }
     .day { aspect-ratio:1; padding:0; border-radius:50%; background:none }
     .day:hover:not(:disabled) { background:var(--accent-soft); filter:none }
+    .day.booked { background:#e6f4ea; color:var(--good); font-weight:600 }
+    .day.booked:hover:not(:disabled) { background:#d2ebd9 }
     .day.on { background:var(--accent); color:#fff; font-weight:600 }
+    .day.on.booked { box-shadow:inset 0 0 0 2px var(--good) } /* picked AND already booked: indigo with a green ring */
     .day:disabled { color:#c7c7cc; opacity:1 }
 
     /* log */
@@ -452,7 +481,7 @@
 
     const body = el("div"); // everything except the header and status line, so minimising is one hidden flag
     body.append(
-      section("Days", el("div", { className: "hint", textContent: "Click days. Click Mo, Tu, ... to pick that weekday all month." }), calendar),
+      section("Days", el("div", { className: "hint", textContent: "Click days. Click Mo, Tu, ... to pick that weekday all month. Green = you already have a desk." }), calendar),
       section("Time (desk's local time)", "From ", startInput, " to ", endInput),
       section("Desks", el("div", { className: "hint", textContent: "Cmd/Ctrl-click to pick several." }), deskFilter, deskSelect,
         el("div", { className: "row" }, el("label", {}, onlyFavouritesBox, " favourites only"), pickFavouritesButton, favouriteButton),
@@ -524,6 +553,50 @@
 
     const pad = (number) => String(number).padStart(2, "0");
 
+    // Days on which you already have a desk: "2026-10-07" -> desk name. Filled by asking the site,
+    // one request per day of the shown month (only days we haven't asked about yet, only once).
+    const myDeskByDate = new Map();
+    const askedDays = new Set();
+    let askingNow = false;
+
+    async function refreshMyDeskDays() {
+      if (askingNow || !token || !userId) return;
+      askingNow = true;
+      try {
+        for (;;) {
+          const year = firstOfShownMonth.getFullYear();
+          const month = firstOfShownMonth.getMonth();
+          const daysInMonth = new Date(year, month + 1, 0).getDate();
+          const pending = [];
+          for (let day = 1; day <= daysInMonth; day++) {
+            const text = `${year}-${pad(month + 1)}-${pad(day)}`;
+            if (!askedDays.has(text) && checkDate(text) === null) pending.push({ text, day }); // past days are skipped
+          }
+          if (pending.length === 0) break;
+          for (const { text, day } of pending) {
+            if (firstOfShownMonth.getMonth() !== month) break; // you moved to another month: start over there
+            const name = await loadMyDeskOfDay(new Date(year, month, day).toISOString());
+            if (name) myDeskByDate.set(text, name);
+            askedDays.add(text);
+            await sleep(150);
+          }
+          drawCalendar();
+        }
+      } catch (error) {
+        console.log("[Desk Batch Booker] could not mark your booked days:", redact(error)); // only cosmetic
+      } finally {
+        askingNow = false;
+      }
+    }
+    refreshBookedDays = refreshMyDeskDays;
+
+    // After Undo we no longer know which days changed, so ask again.
+    const forgetMyDeskDays = () => {
+      myDeskByDate.clear();
+      askedDays.clear();
+      drawCalendar();
+    };
+
     function drawCalendar() {
       const year = firstOfShownMonth.getFullYear();
       const month = firstOfShownMonth.getMonth();
@@ -552,7 +625,13 @@
       for (let i = 0; i < blanksBeforeFirst; i++) cells.push(el("span"));
       for (let day = 1; day <= daysInMonth; day++) {
         const text = dateText(day);
-        const button = el("button", { className: selectedDates.has(text) ? "day on" : "day", textContent: day, disabled: !bookable(day) });
+        const classes = ["day", selectedDates.has(text) && "on", myDeskByDate.has(text) && "booked"];
+        const button = el("button", {
+          className: classes.filter(Boolean).join(" "),
+          textContent: day,
+          disabled: !bookable(day),
+          title: myDeskByDate.has(text) ? `You already have a desk: ${myDeskByDate.get(text)}` : "",
+        });
         button.onclick = () => {
           if (selectedDates.has(text)) selectedDates.delete(text);
           else selectedDates.add(text);
@@ -561,6 +640,7 @@
         cells.push(button);
       }
       daysGrid.replaceChildren(...cells);
+      refreshMyDeskDays(); // no-op while a check is already running or the session isn't known yet
       dateSummary.textContent = `${selectedDates.size} day(s) selected`;
       refreshButtons();
     }
@@ -679,6 +759,7 @@
       }
       setStatus(bookedIds.length ? `${bookedIds.length} booking(s) still not cancelled.` : "All cancelled.");
       setBusy(false);
+      forgetMyDeskDays();
     };
 
     // ----- check-in -----
@@ -824,6 +905,7 @@
               const id = readReservationId(text);
               if (status === 200 && id) {
                 log(`Booked ${job.date}  ${job.name}`, "ok");
+                myDeskByDate.set(job.date, job.name); // turns the day green
                 bookedIds.push(id);
                 updateUndoButton();
                 return true;
@@ -858,6 +940,7 @@
           }
           await sleep(pause);
         }
+        drawCalendar();
         setStatus(`${booked} of ${jobs.length} booked.` + (booked ? ` "Undo bookings" cancels them.` : ""));
       } finally {
         stopButton.hidden = true;
