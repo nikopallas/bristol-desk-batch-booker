@@ -49,6 +49,7 @@
   let deskCountSeen = 0;
   let refreshDeskList = () => {}; // the panel replaces this once it exists
   let refreshBookedDays = () => {}; // same: re-checks which days already have a desk of yours
+  let deskLoadFailed = false; // true if loading your desks failed (so the panel can say so)
 
   function inspectRequest(url, body) {
     if (typeof body !== "string" || !isSiteApiUrl(url)) return;
@@ -78,7 +79,10 @@
         refreshDeskList();
         refreshBookedDays(); // the session is known now, so we can ask for your bookings
       })
-      .catch((error) => console.log("[Desk Batch Booker] could not load desk names:", redact(error)));
+      .catch((error) => {
+        deskLoadFailed = true;
+        console.log("[Desk Batch Booker] could not load desk names:", redact(error));
+      });
   }
 
   // A rejected login means the token is dead: forget it.
@@ -431,6 +435,10 @@
     .picked { max-height:4.5em; overflow:auto; margin-top:4px }
     .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:6px }
     .between { justify-content:space-between }
+    .loading { display:flex; gap:8px; align-items:center; margin-top:10px; color:var(--muted); font-size:12px }
+    .spinner { flex:none; width:12px; height:12px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite }
+    @keyframes spin { to { transform:rotate(360deg) } }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation:none } }
     .status { margin-top:10px; padding:6px 10px; border-radius:8px; background:var(--accent-soft); color:var(--accent); font-weight:500 }
 
     /* calendar */
@@ -488,6 +496,10 @@
     const stopButton = el("button", { className: "stop", textContent: "Stop", hidden: true, title: "Stops before the next booking. Bookings already made stay (use Undo bookings)." });
     const undoButton = el("button", { textContent: "Undo bookings", hidden: true, title: "Cancels the bookings made by this tool in this browser tab (also after a reload)" });
     const planSummary = el("div", { className: "hint" });
+    // Shown while the panel is still getting ready (connecting, loading desks, marking booked days).
+    const loadingText = el("span");
+    const spinner = el("span", { className: "spinner" });
+    const loadingLine = el("div", { className: "loading", hidden: true }, spinner, loadingText);
     const statusLine = el("div", { className: "status", hidden: true }); // what is happening right now, also visible while minimised
     const logBox = el("div", { className: "log", hidden: true }); // only shown once there is something to say
     const minimiseButton = el("button", { className: "icon", textContent: "–", title: "Minimise / restore the panel" });
@@ -511,7 +523,7 @@
     );
     box.append(
       el("div", { className: "header" }, el("b", { textContent: "Batch desk booking" }), minimiseButton),
-      statusLine, body
+      loadingLine, statusLine, body
     );
     minimiseButton.onclick = () => {
       body.hidden = !body.hidden;
@@ -964,6 +976,29 @@
         setBusy(false);
       }
     };
+
+    // What is the panel still waiting for? Checked a few times a second; says nothing once everything is ready.
+    const panelStarted = Date.now();
+    function updateLoadingLine() {
+      let text = "";
+      let gaveUp = false; // true: nothing is loading any more, so no spinner
+      if (!token || !userId) {
+        gaveUp = Date.now() - panelStarted > 15000;
+        text = gaveUp ? "Still not connected to the site. Reload the page, and click something on it once." : "Connecting to the site...";
+      } else if (deskLoadFailed) {
+        gaveUp = true;
+        text = "Could not load your desks. Reload the page to try again.";
+      } else if (Object.keys(deskNames).length === 0) {
+        text = "Loading your desks...";
+      } else if (askingNow) {
+        text = "Checking which days you already have a desk...";
+      }
+      loadingText.textContent = text;
+      loadingLine.hidden = !text;
+      spinner.hidden = gaveUp;
+    }
+    updateLoadingLine();
+    setInterval(updateLoadingLine, 400);
 
     const host = el("div");
     nativeAttachShadow.call(host, { mode: "closed" }).append(el("style", { textContent: PANEL_CSS }), box);
