@@ -29,6 +29,21 @@
     }
   }
 
+  // Runs task(item) for every item, a few at a time instead of one after the other. Results keep the order.
+  // Only used for requests that just READ (names, availability, your bookings), never for booking.
+  async function mapParallel(items, limit, task) {
+    const results = new Array(items.length);
+    let next = 0;
+    async function worker() {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await task(items[index], index);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+    return results;
+  }
+
   // Server text may end up in the log or console. Cut it short and hide anything that looks like a token.
   const redact = (text, maxLength = 200) => String(text).slice(0, maxLength).replace(/[A-Za-z0-9+\/=_-]{40,}/g, "***");
 
@@ -47,6 +62,27 @@
   const deskTimezones = Object.create(null); // timezone of each desk, e.g. { 660: "GMT Standard Time" }
   const timezoneOf = (tableId) => deskTimezones[tableId] || DEFAULT_TIMEZONE;
   let deskCountSeen = 0;
+
+  // Desk names hardly ever change, so the last answer is kept (in this site's localStorage): the desk list
+  // then shows up at once on the next visit, and is refreshed in the background.
+  const DESK_CACHE_KEY = "deskBatchBooker.desks";
+  function loadDeskCache() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(DESK_CACHE_KEY));
+      for (const [code, name] of Object.entries(saved.names).slice(0, 3000)) {
+        if (/^\d{1,6}$/.test(code) && typeof name === "string" && name.length <= 200) deskNames[code] = name;
+      }
+      for (const [code, zone] of Object.entries(saved.timezones).slice(0, 3000)) {
+        if (/^\d{1,6}$/.test(code) && typeof zone === "string" && /^[\w .+-]{1,64}$/.test(zone)) deskTimezones[code] = zone;
+      }
+    } catch {} // nothing saved yet, or unreadable: we simply ask the site
+  }
+  function saveDeskCache() {
+    try {
+      localStorage.setItem(DESK_CACHE_KEY, JSON.stringify({ names: deskNames, timezones: deskTimezones }));
+    } catch {}
+  }
+  loadDeskCache();
   let refreshDeskList = () => {}; // the panel replaces this once it exists
   let refreshBookedDays = () => {}; // same: re-checks which days already have a desk of yours
   let deskLoadFailed = false; // true if loading your desks failed (so the panel can say so)
@@ -75,7 +111,9 @@
     deskCountSeen = ids.length;
     lookupNames(ids.filter(Number.isInteger))
       .then((names) => {
+        for (const code of Object.keys(deskNames)) delete deskNames[code]; // forget desks you can no longer see
         Object.assign(deskNames, names);
+        saveDeskCache();
         refreshDeskList();
         refreshBookedDays(); // the session is known now, so we can ask for your bookings
       })
@@ -144,30 +182,31 @@
   async function lookupNames(ids) {
     requireSession();
     const names = Object.create(null);
-    for (let i = 0; i < ids.length; i += 100) { // ask for 100 codes at a time
-      if (i > 0) await sleep(300); // be gentle with the server
+    const chunks = [];
+    for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100)); // 100 codes per request
+
+    await mapParallel(chunks, 3, async (chunk) => {
       // "/webapi/..." requests also want the token as an "auth_token" header (the /Services/ ones don't).
       const response = await originalFetch("/webapi/reporting/getdata/", {
         method: "POST",
         headers: { "content-type": "application/json", "smartway2-version": siteVersion, auth_token: token },
         body: JSON.stringify({
           viewname: "ts_rep_officeclosure_hierarchy",
-          filter: [{ field: "locationid", operator: "anyof", values: ids.slice(i, i + 100), includenull: false }],
+          filter: [{ field: "locationid", operator: "anyof", values: chunk, includenull: false }],
           token: token,
         }),
       });
       forgetTokenIfRejected(response.status);
       const text = await response.text();
       if (!response.ok || !text) throw new Error(`name lookup failed: HTTP ${response.status}, answer: "${redact(text, 100)}"`);
-      const data = JSON.parse(text);
-      for (const row of data.view || []) {
+      for (const row of JSON.parse(text).view || []) {
         // Only accept rows of the expected shape (text name, whole-number code).
         if (row.offset === 0 && row.location_type === "Location" && Number.isInteger(row.locationid) && typeof row.name === "string") {
           names[row.locationid] = row.name;
           if (typeof row.timezone === "string" && /^[\w .+-]{1,64}$/.test(row.timezone)) deskTimezones[row.locationid] = row.timezone;
         }
       }
-    }
+    });
     return names;
   }
 
@@ -354,7 +393,7 @@
   // ---------- Section 3: validation ----------
   // No cap on how many bookings or how far ahead: the site decides what it accepts, and a run stops
   // by itself when bookings keep failing (see the booking loop).
-  const PAUSE_BETWEEN_REQUESTS_MS = 800; // normal pause between requests; grows when the site pushes back
+  const PAUSE_BETWEEN_REQUESTS_MS = 300; // normal pause between requests; grows when the site pushes back
   const MAX_PAUSE_MS = 10000;
   const MAX_RETRIES_WHEN_THROTTLED = 3;
 
@@ -602,13 +641,12 @@
             if (!askedDays.has(text) && checkDate(text) === null) pending.push({ text, day }); // past days are skipped
           }
           if (pending.length === 0) break;
-          for (const { text, day } of pending) {
-            if (firstOfShownMonth.getMonth() !== month) break; // you moved to another month: start over there
+          await mapParallel(pending, 4, async ({ text, day }) => {
+            if (firstOfShownMonth.getMonth() !== month) return; // you moved to another month: start over there
             const name = await loadMyDeskOfDay(new Date(year, month, day).toISOString());
             if (name) myDeskByDate.set(text, name);
             askedDays.add(text);
-            await sleep(150);
-          }
+          });
           drawCalendar();
         }
       } catch (error) {
@@ -865,12 +903,12 @@
     // Asks the site which jobs are already reserved. Returns a Set of "table|date" keys.
     async function findTakenJobs(plan) {
       const taken = new Set();
-      for (const [i, date] of plan.dates.entries()) {
-        setStatus(`Checking availability... day ${i + 1} of ${plan.dates.length}`);
+      let done = 0;
+      await mapParallel(plan.dates, 4, async (date) => {
         const busyTables = await findTakenTables(date, plan.start, plan.end, plan.tables.map(Number));
         busyTables.forEach((table) => taken.add(`${table}|${date}`));
-        await sleep(PAUSE_BETWEEN_REQUESTS_MS);
-      }
+        setStatus(`Checking availability... ${++done} of ${plan.dates.length} days`);
+      });
       return taken;
     }
     const jobKey = (job) => `${job.table}|${job.date}`;
