@@ -529,6 +529,8 @@
     const onlyFavouritesBox = el("input", { type: "checkbox" });
     const favouriteButton = el("button", { className: "link", textContent: "★ Favourite / unfavourite picked", title: "Adds the picked desks to your favourites, or removes them if they all are favourites already" });
     const pickFavouritesButton = el("button", { className: "link", textContent: "Pick all favourites" });
+    const nicknameInput = el("input", { placeholder: "Nickname for the picked desk, e.g. Window seat", maxLength: 40 });
+    const nicknameButton = el("button", { className: "link", textContent: "Save nickname", title: "Gives the one picked desk a nickname (and makes it a favourite). Empty = remove the nickname." });
     const bookButton = el("button", { className: "primary", textContent: "Book all", title: "Books every picked desk on every picked day" });
     const checkButton = el("button", { textContent: "Check free", title: "Shows which desks are already taken. Books nothing." });
     const checkInButton = el("button", { textContent: "Check in now", title: "Checks in everything that is open for check-in" });
@@ -553,6 +555,7 @@
       section("Time (desk's local time)", "From ", startInput, " to ", endInput),
       section("Desks", el("div", { className: "hint", textContent: "Cmd/Ctrl-click to pick several." }), deskFilter, deskSelect,
         el("div", { className: "row" }, el("label", {}, onlyFavouritesBox, " favourites only"), pickFavouritesButton, favouriteButton),
+        el("div", { className: "row" }, nicknameInput, nicknameButton),
         pickedSummary),
       section("Desk codes", tablesInput),
       el("div", { className: "section" }, planSummary,
@@ -720,23 +723,36 @@
     // ----- desk picker -----
     const pickedCodes = new Set(); // codes chosen in the list (they stay chosen while you filter)
 
-    // Favourites are just desk codes, remembered in this site's localStorage (no secrets in there).
+    // Favourites: desk code -> nickname ("" = no nickname). Remembered in this site's localStorage (no secrets in there).
     const FAVOURITES_KEY = "deskBatchBooker.favourites";
-    let favourites = new Set();
+    const favourites = new Map();
     try {
-      favourites = new Set(JSON.parse(localStorage.getItem(FAVOURITES_KEY)) || []);
+      const saved = JSON.parse(localStorage.getItem(FAVOURITES_KEY)) || {};
+      // Older versions saved a plain list of codes; newer ones an object { code: nickname }.
+      const entries = Array.isArray(saved) ? saved.map((code) => [code, ""]) : Object.entries(saved);
+      for (const [code, nickname] of entries) {
+        if (/^\d{1,6}$/.test(String(code)) && typeof nickname === "string") favourites.set(String(code), nickname.slice(0, 40));
+      }
     } catch {} // storage blocked or broken: start without favourites
     const saveFavourites = () => {
       try {
-        localStorage.setItem(FAVOURITES_KEY, JSON.stringify([...favourites]));
+        localStorage.setItem(FAVOURITES_KEY, JSON.stringify(Object.fromEntries(favourites)));
       } catch {}
+    };
+
+    // How a desk is shown to people: "Window seat (3.210-028, ...)" or just the official name.
+    const deskLabel = (code) => {
+      const name = deskNames[code] || code;
+      const nickname = favourites.get(code);
+      return nickname ? `${nickname} (${name})` : name;
     };
 
     // Show the picked desks by name (people remember names, not codes) and in the codes field.
     const showPickedInCodesField = () => {
       tablesInput.value = [...pickedCodes].join(", ");
-      const names = [...pickedCodes].map((code) => deskNames[code] || code);
+      const names = [...pickedCodes].map(deskLabel);
       pickedSummary.textContent = names.length ? `${names.length} picked: ${names.join("; ")}` : "No desks picked yet.";
+      nicknameInput.value = pickedCodes.size === 1 ? favourites.get([...pickedCodes][0]) || "" : "";
       refreshButtons();
     };
     tablesInput.oninput = refreshButtons; // you may still type codes by hand
@@ -744,7 +760,7 @@
     refreshDeskList = () => {
       const filter = deskFilter.value.toLowerCase();
       const desks = Object.entries(deskNames)
-        .filter(([, name]) => name.toLowerCase().includes(filter))
+        .filter(([code, name]) => deskLabel(code).toLowerCase().includes(filter))
         .filter(([code]) => !onlyFavouritesBox.checked || favourites.has(code))
         .sort((a, b) => {
           const byFavourite = favourites.has(b[0]) - favourites.has(a[0]); // favourites first
@@ -755,8 +771,8 @@
         return;
       }
       deskSelect.replaceChildren(
-        ...desks.map(([code, name]) =>
-          el("option", { value: code, textContent: (favourites.has(code) ? "★ " : "") + name, selected: pickedCodes.has(code) })
+        ...desks.map(([code]) =>
+          el("option", { value: code, textContent: (favourites.has(code) ? "★ " : "") + deskLabel(code), selected: pickedCodes.has(code) })
         )
       );
     };
@@ -772,12 +788,20 @@
     favouriteButton.onclick = () => {
       const picked = [...pickedCodes];
       const allAreFavourites = picked.length > 0 && picked.every((code) => favourites.has(code));
-      picked.forEach((code) => (allAreFavourites ? favourites.delete(code) : favourites.add(code)));
+      picked.forEach((code) => (allAreFavourites ? favourites.delete(code) : favourites.set(code, favourites.get(code) || "")));
       saveFavourites();
       refreshDeskList();
     };
     pickFavouritesButton.onclick = () => {
-      favourites.forEach((code) => deskNames[code] && pickedCodes.add(code)); // only desks that exist
+      favourites.forEach((nickname, code) => deskNames[code] && pickedCodes.add(code)); // only desks that exist
+      showPickedInCodesField();
+      refreshDeskList();
+    };
+    nicknameButton.onclick = () => {
+      if (pickedCodes.size !== 1) return log("Pick exactly one desk in the list first, then type its nickname.", "skip");
+      const code = [...pickedCodes][0];
+      favourites.set(code, nicknameInput.value.trim().slice(0, 40)); // also makes it a favourite
+      saveFavourites();
       showPickedInCodesField();
       refreshDeskList();
     };

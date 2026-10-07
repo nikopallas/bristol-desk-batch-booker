@@ -61,7 +61,7 @@ The requests are the same platform's, but it is untested outside the author's si
 The **–** button in the panel's corner minimises it (progress stays visible); **+** restores it.
 1. **Days**: click days in the calendar. Click a weekday header (Mo, Tu, …) to toggle that weekday for the whole month.
 2. **Time**: start and end (the desk's local wall-clock time, e.g. 09:00 to 17:00). Your times are remembered for next time.
-3. **Desks**: filter and pick desks in the list (Cmd/Ctrl-click for several). Use ★ to save favourites. The picked desks are listed by name below the list.
+3. **Desks**: filter and pick desks in the list (Cmd/Ctrl-click for several). Use ★ to save favourites; pick one desk and type a nickname (e.g. "Window seat") to give it a name of your own. The picked desks are listed by name below the list.
 4. The line above the buttons says how many bookings this makes. The buttons stay greyed out until you have picked days and desks (and while the count is over the limit).
 5. **Check free** shows which desk/day combinations are already taken. Nothing is booked.
 6. **Book all** skips taken desks, then books one after the other (no confirm dialog: check the "N bookings" line above the buttons first) ("Booking 2 of 5…"). **Stop** ends the run before the next booking.
@@ -102,7 +102,7 @@ Things that were learned the hard way:
 - The session token is kept in memory only. It is never stored, never logged, and only ever sent back to the booking site (all requests use relative addresses on the site's own origin). Server error text shown in the panel is shortened and long token-like strings are hidden.
 - **The extension runs in the page's own context** (it has to, to see the site's requests). Scripts of the booking site itself can therefore in principle see what the extension sees. The site's normal login already exposes the token to those scripts, so this adds little, but it is not a sandbox.
 - The panel sits in a closed shadow root, but that only keeps the page's styles and scripts from interfering by accident: it is **not** a security boundary. Buttons therefore only react to real clicks, not to clicks made by scripts.
-- Only favourites (desk codes) are stored, in the site's `localStorage` (readable by scripts of that site, harmless for desk codes).
+- Only these are stored, in the site's `localStorage` (readable by scripts of that site, harmless): favourites with their nicknames, your chosen start/end time, and a cache of desk names. Reservation ids for Undo live in `sessionStorage` (this tab only).
 - Safeguards: every value is validated before it is sent; the desk list, names and timezones from the server are checked for shape; the reservation id used by Undo is read from the answer's `id` field and must look like an id; if the availability check fails, nothing is booked.
 - The panel is built without `innerHTML`.
 - Never commit HAR files: they contain a live session token (`*.har` is in `.gitignore`).
