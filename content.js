@@ -462,17 +462,20 @@
     .box {
       --text:#1d1d1f; --muted:#86868b; --line:#e5e5ea; --fill:#f5f5f7;
       --accent:#4f46e5; --accent-soft:#eceafd; --good:#188038; --warn:#b06000; --bad:#d93025;
+      --gap:12px; --radius:8px;
       position:fixed; bottom:16px; right:16px; z-index:2147483647; width:340px; max-width:calc(100vw - 32px);
-      max-height:calc(100vh - 32px); overflow:auto; box-sizing:border-box; padding:16px;
+      max-height:calc(100vh - 32px); max-height:calc(100dvh - 32px); overflow:auto; box-sizing:border-box;
+      padding:14px 14px 0; /* no bottom padding: the sticky action bar sits flush with the bottom edge */
       background:#fff; color:var(--text); border-radius:16px;
-      font:13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font:13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       box-shadow:0 12px 40px rgba(0,0,0,.18), 0 0 0 1px rgba(0,0,0,.05) }
     [hidden] { display:none !important }
 
-    /* buttons: quiet grey by default, filled colour only for the main action */
-    button { font:inherit; color:inherit; background:var(--fill); border:0; border-radius:8px; padding:6px 12px; cursor:pointer }
+    /* buttons: three levels. primary = filled, default = quiet grey, link = text only */
+    button { font:inherit; color:inherit; background:var(--fill); border:0; border-radius:var(--radius); padding:6px 12px; cursor:pointer; transition:background .12s, box-shadow .12s }
     button:hover:not(:disabled) { filter:brightness(.95) }
     button:disabled { opacity:.4; cursor:not-allowed }
+    button:focus-visible, summary:focus-visible { outline:2px solid var(--accent); outline-offset:1px }
     .primary { flex:1; background:var(--accent); color:#fff; font-weight:600 }
     .stop { background:var(--bad); color:#fff; font-weight:600 }
     .icon { width:28px; height:28px; padding:0; font-size:16px; line-height:1; background:none }
@@ -480,36 +483,43 @@
     .link { padding:2px 4px; background:none; color:var(--accent); font-size:12px }
     .link:hover:not(:disabled) { text-decoration:underline; filter:none }
 
-    input, select { font:inherit; color:inherit; box-sizing:border-box; border:1px solid var(--line); border-radius:8px; padding:6px 8px; background:#fff }
+    input, select { font:inherit; color:inherit; box-sizing:border-box; border:1px solid var(--line); border-radius:var(--radius); padding:5px 8px; background:#fff }
     input:focus, select:focus { outline:2px solid var(--accent-soft); border-color:var(--accent) }
-    select { padding:4px }
-    option { padding:3px 6px; border-radius:6px }
+    select { padding:3px }
+    option { padding:2px 6px; border-radius:6px }
     option:checked { background:var(--accent) linear-gradient(0deg, var(--accent), var(--accent)); color:#fff }
     .muted { background:var(--fill); color:var(--muted); border-color:transparent; font-size:12px }
     .wide { width:100% }
 
-    .tabs { display:flex; gap:4px; margin-top:12px; padding:3px; background:var(--fill); border-radius:10px }
-    .tab { flex:1; background:none; color:var(--muted); font-weight:600 }
+    .tabs { display:flex; gap:4px; padding:3px; background:var(--fill); border-radius:10px }
+    .tab { flex:1; padding:4px 12px; background:none; color:var(--muted); font-weight:600 }
     .tab.on { background:#fff; color:var(--text); box-shadow:0 1px 3px rgba(0,0,0,.12) }
-    .header { display:flex; justify-content:space-between; align-items:center }
+    .header { display:flex; justify-content:space-between; align-items:center; padding-bottom:var(--gap) }
     .header b { font-size:15px; font-weight:600 }
-    .section { margin-top:16px }
-    .label { display:block; margin-bottom:6px; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted) }
+    .section { margin-top:var(--gap) }
+    .label { display:block; margin-bottom:4px; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted) }
     .hint { color:var(--muted); font-size:12px }
     .picked { max-height:4.5em; overflow:auto; margin-top:4px }
-    .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:6px }
+    .row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:6px }
     .between { justify-content:space-between }
-    .loading { display:flex; gap:8px; align-items:center; margin-top:10px; color:var(--muted); font-size:12px }
+    .row input:not([type="checkbox"]) { flex:1; min-width:0 } /* fields share the line (times, nickname) */
+    .loading { display:flex; gap:8px; align-items:center; margin-bottom:var(--gap); color:var(--muted); font-size:12px }
     .spinner { flex:none; width:12px; height:12px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite }
     @keyframes spin { to { transform:rotate(360deg) } }
-    @media (prefers-reduced-motion: reduce) { .spinner { animation:none } }
-    .status { margin-top:10px; padding:6px 10px; border-radius:8px; background:var(--accent-soft); color:var(--accent); font-weight:500 }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation:none } button { transition:none } }
+    .status { margin-bottom:var(--gap); padding:6px 10px; border-radius:var(--radius); background:var(--accent-soft); color:var(--accent); font-weight:500 }
 
-    /* calendar */
-    .days { display:grid; grid-template-columns:repeat(7, 1fr); gap:2px; margin:4px 0; text-align:center }
-    .weekday { padding:4px 0; background:none; color:var(--muted); font-size:11px; font-weight:600 }
+    /* small collapsible blocks (favourites & nicknames, codes) */
+    .more { margin-top:6px }
+    .more summary { cursor:pointer; color:var(--muted); font-size:12px; padding:2px 0 }
+    .more summary:hover { color:var(--text) }
+    .more[open] summary { margin-bottom:2px }
+
+    /* calendar: small round days */
+    .days { display:grid; grid-template-columns:repeat(7, 1fr); gap:1px; margin:2px 0; text-align:center; justify-items:center }
+    .weekday { padding:2px 0; background:none; color:var(--muted); font-size:11px; font-weight:600 }
     .weekday:hover:not(:disabled) { color:var(--accent); filter:none }
-    .day { aspect-ratio:1; padding:0; border-radius:50%; background:none }
+    .day { width:28px; height:28px; padding:0; border-radius:50%; background:none; font-size:12px }
     .day:hover:not(:disabled) { background:var(--accent-soft); filter:none }
     .day.booked { background:#e6f4ea; color:var(--good); font-weight:600 }
     .day.booked:hover:not(:disabled) { background:#d2ebd9 }
@@ -517,8 +527,15 @@
     .day.on.booked { box-shadow:inset 0 0 0 2px var(--good) } /* picked AND already booked: indigo with a green ring */
     .day:disabled { color:#c7c7cc; opacity:1 }
 
+    /* main actions stay visible at the bottom while the rest of the panel scrolls */
+    .actions { position:sticky; bottom:0; z-index:1; margin:var(--gap) -14px 0; padding:8px 14px 12px; background:#fff; border-top:1px solid var(--line) }
+    .actions .row { margin-top:6px }
+    .extras { margin-top:6px }
+
+    .body { padding-bottom:14px }
+
     /* log */
-    .log { max-height:160px; overflow:auto; margin-top:14px; padding:8px 10px; background:var(--fill); border-radius:10px; font:12px/1.5 ui-monospace, Menlo, monospace }
+    .log { max-height:160px; overflow:auto; margin-top:var(--gap); padding:8px 10px; background:var(--fill); border-radius:10px; font:12px/1.5 ui-monospace, Menlo, monospace }
     .log div { white-space:pre-wrap }
     .ok { color:var(--good) } .fail { color:var(--bad); font-weight:600 } .skip { color:var(--warn) }
   `;
@@ -563,7 +580,7 @@
     const nicknameButton = el("button", { className: "link", textContent: "Save nickname", title: "Gives the one picked desk a nickname (and makes it a favourite). Empty = remove the nickname." });
     const bookButton = el("button", { className: "primary", textContent: "Book all", title: "Books every picked desk on every picked day" });
     const checkButton = el("button", { textContent: "Check free", title: "Shows which desks are already taken. Books nothing." });
-    const checkInButton = el("button", { textContent: "Check in now", title: "Checks in everything that is open for check-in" });
+    const checkInButton = el("button", { className: "link", textContent: "Check in now", title: "Checks in everything that is open for check-in" });
     const stopButton = el("button", { className: "stop", textContent: "Stop", hidden: true, title: "Stops before the next booking. Bookings already made stay (use Undo bookings)." });
     const undoButton = el("button", { textContent: "Undo bookings", hidden: true, title: "Cancels the bookings made by this tool in this browser tab (also after a reload)" });
     const planSummary = el("div", { className: "hint" });
@@ -581,22 +598,29 @@
 
     const titleSection = section("Title (shown on the booking)", titleInput);
     titleSection.hidden = true; // only rooms have a title
-    const placesSection = section("Desks", el("div", { className: "hint", textContent: "Cmd/Ctrl-click to pick several." }), deskFilter, deskSelect,
-      el("div", { className: "row" }, el("label", {}, onlyFavouritesBox, " favourites only"), pickFavouritesButton, favouriteButton),
-      el("div", { className: "row" }, nicknameInput, nicknameButton),
-      pickedSummary);
+    // A small collapsed block for things you rarely need, so the main flow stays short.
+    const disclosure = (summaryText, ...children) =>
+      el("details", { className: "more" }, el("summary", { textContent: summaryText }), ...children);
 
-    const body = el("div"); // everything except the header and status line, so minimising is one hidden flag
+    // The first child must stay the label: setMode() renames it to "Desks" / "Rooms".
+    const placesSection = section("Desks", deskFilter, deskSelect, el("div", { className: "hint", textContent: "Cmd/Ctrl-click to pick several." }),
+      el("div", { className: "row between" }, el("label", {}, onlyFavouritesBox, " favourites only"), pickFavouritesButton),
+      pickedSummary,
+      disclosure("Favourites & nicknames",
+        el("div", { className: "row" }, favouriteButton),
+        el("div", { className: "row" }, nicknameInput, nicknameButton)));
+
+    const body = el("div", { className: "body" }); // everything except the header and status line, so minimising is one hidden flag
     body.append(
       el("div", { className: "tabs" }, deskTab, roomTab),
-      section("Days", el("div", { className: "hint", textContent: "Click days. Click Mo, Tu, ... to pick that weekday all month. Green = you already have a desk." }), calendar),
-      section("Time (desk's local time)", "From ", startInput, " to ", endInput),
+      section("Days", calendar, el("div", { className: "hint", textContent: "Click days, or Mo, Tu, ... for that weekday all month. Green = you already have a desk." })),
+      section("Time (desk's local time)", el("div", { className: "row time" }, startInput, el("span", { className: "hint", textContent: "to" }), endInput)),
       placesSection,
       titleSection,
-      section("Codes (filled in from your picks)", tablesInput),
-      el("div", { className: "section" }, planSummary,
-        el("div", { className: "row" }, checkButton, bookButton, stopButton, undoButton),
-        el("div", { className: "row" }, checkInButton), el("div", { className: "hint", textContent: "Anything open for check-in is checked in automatically every minute while this page is open." })),
+      disclosure("Codes (filled in from your picks)", tablesInput),
+      el("div", { className: "actions" }, planSummary,
+        el("div", { className: "row" }, checkButton, bookButton, stopButton, undoButton)),
+      el("div", { className: "extras" }, checkInButton, el("span", { className: "hint", textContent: "Open check-ins are done automatically every minute while this page is open." })),
       logBox
     );
     box.append(
