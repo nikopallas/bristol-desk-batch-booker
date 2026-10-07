@@ -14,8 +14,16 @@
 > **Be kind:** don't hoard desks you won't use. Your colleagues would also like a window seat. 🌤️
 
 
-A small Chrome extension for `uob.smartway2book.com`: pick several days and desks
+A small Chrome extension for `uob.smartway2book.com`: pick several days and desks (or rooms)
 and book them all in one go. Vanilla JavaScript, no libraries, no build step.
+
+**What it can do**
+- Book **desks and rooms** for many days at once (one desk per day, or several desks, or a room with a title).
+- Month **calendar** with multi-select, weekday shortcuts, and **green days** where you already have a desk (hover to see which).
+- **Check free** before booking, and automatic skipping of desks that are already taken.
+- **Favourites with nicknames** ("Window seat"), remembered **working hours**, and a cached desk list for a fast start.
+- **Undo** for the bookings you just made (works after a reload), and automatic **check-in**.
+- Gentle with the site: parallel reads, one booking at a time, automatic slow-down when the site says "too many requests".
 
 ## Install
 You need Google Chrome (or another Chromium browser such as Edge or Brave), plus `git` to download it.
@@ -59,15 +67,16 @@ The requests are the same platform's, but it is untested outside the author's si
 
 ## Use
 The **–** button in the panel's corner minimises it (progress stays visible); **+** restores it.
-1. **Days**: click days in the calendar. Click a weekday header (Mo, Tu, …) to toggle that weekday for the whole month.
-2. **Time**: start and end (the desk's local wall-clock time, e.g. 09:00 to 17:00). Your times are remembered for next time.
-3. **Desks or rooms**: the switch at the top chooses what you book. For a room, also give the booking a **title**; rooms can be booked in any time slot (quarter hours are fine). The same favourites, nicknames, free check and undo work for rooms. Rooms are an addition built from one captured booking and are less tested than desks: try one booking first.
-4. **Desks / rooms list**: filter and pick desks in the list (Cmd/Ctrl-click for several). Open **Favourites & nicknames** under the list to save favourites with ★; pick one desk and type a nickname (e.g. "Window seat") to give it a name of your own. The picked desks are listed by name below the list. The greyed **Codes** field is folded away (you rarely need it).
-4. The line above the buttons says how many bookings this makes. The buttons stay greyed out until you have picked days and desks.
-5. **Check free** shows which desk/day combinations are already taken. Nothing is booked.
-6. **Book all** skips taken desks, then books one after the other (no confirm dialog: check the "N bookings" line above the buttons first) ("Booking 2 of 5…"). **Stop** ends the run before the next booking.
-7. **Undo bookings** cancels everything this tool booked in this browser tab (it also works after a reload).
-8. **Check-in is automatic**: every minute, while the booking page is open, everything open for check-in is checked in. **Check in now** does it immediately.
+1. Pick **Desks** or **Rooms** with the switch at the top.
+2. **Days**: click days in the calendar. Click a weekday header (Mo, Tu, …) to toggle that weekday for the whole month. Green days are days where you already have a desk.
+3. **Time**: start and end (the place's local wall-clock time, e.g. 09:00 to 17:00; rooms can use any quarter hour). Your times are remembered for next time.
+4. **Desks / rooms**: filter and pick in the list (Cmd/Ctrl-click for several). Open **Favourites & nicknames** under the list to save favourites with ★; pick one and type a nickname (e.g. "Window seat") to give it a name of your own. The greyed **Codes** field is folded away (you rarely need it).
+5. **Rooms only:** give the booking a **title**. Rooms are an addition built from one captured booking and are less tested than desks: try a single booking first.
+6. The line above the buttons says how many bookings this makes. The buttons stay greyed out until you have picked days and something to book.
+7. **Check free** shows which combinations are already taken. Nothing is booked.
+8. **Book all** skips taken ones, then books one after the other ("Booking 2 of 5…"). There is no confirm dialog, so glance at the "N bookings" line first. **Stop** ends the run before the next booking.
+9. **Undo bookings** cancels everything this tool booked in this browser tab (it also works after a reload).
+10. **Check-in is automatic**: every minute, while the booking page is open, everything open for check-in is checked in. **Check in now** does it immediately.
 
 ## Safety (on purpose)
 - There is no fixed cap on the number of bookings or on how far ahead you can book: the site decides what it accepts, and its refusal shows up in the log. Dates in the past are not allowed.
@@ -85,13 +94,16 @@ site makes (found in a HAR export):
 | Book | `POST /Services/ReservationsWS.svc/Save6` |
 | Cancel | `POST /Services/ReservationsWS.svc/Delete` |
 | Who is busy | `POST /Services/ReservationsWS.svc/GetReservationTimesByLocationIds` |
+| Your bookings (green days) | `POST /webapi/reservations/loadreservationoccurrences` (one request per day) |
 | Desk names | `POST /webapi/reporting/getdata/` (view `ts_rep_officeclosure_hierarchy`) |
-| Desk list, your user id | read from the site's own `SaveUserProfile` request on page load (so it works for any account) |
+| Desk list, room list, your user id | read from the site's own `SaveUserProfile` request on page load (so it works for any account) |
 
 Things that were learned the hard way:
 - `/webapi/...` calls also need the token as an `auth_token` header; `/Services/...` calls only need it in the body.
 - Times are sent as wall-clock time written as UTC (`09:00` → `09:00Z`); the site converts using the `timezone` field. Do **not** use the browser's timezone.
 - The site's weekday numbering is Monday = 1 … Sunday = 7.
+- A room booking is the same `Save6` request as a desk booking, with the room's code, your own title, `showTimeAsFree: false` and a few empty form fields.
+- How far ahead you may book is set by the site per user group (each place carries "Days in advance" rules), so there is no limit in the tool itself.
 
 ## Before installing (please read)
 - **Unofficial.** This tool uses the booking site's undocumented API. It may break at any time, may go against the site's terms, and could get an account flagged. You use it at your own risk; no warranty. Follow your organisation's desk-booking rules.
@@ -103,7 +115,7 @@ Things that were learned the hard way:
 - The session token is kept in memory only. It is never stored, never logged, and only ever sent back to the booking site (all requests use relative addresses on the site's own origin). Server error text shown in the panel is shortened and long token-like strings are hidden.
 - **The extension runs in the page's own context** (it has to, to see the site's requests). Scripts of the booking site itself can therefore in principle see what the extension sees. The site's normal login already exposes the token to those scripts, so this adds little, but it is not a sandbox.
 - The panel sits in a closed shadow root, but that only keeps the page's styles and scripts from interfering by accident: it is **not** a security boundary. Buttons therefore only react to real clicks, not to clicks made by scripts.
-- Only these are stored, in the site's `localStorage` (readable by scripts of that site, harmless): favourites with their nicknames, your chosen start/end time, and a cache of desk names. Reservation ids for Undo live in `sessionStorage` (this tab only).
+- Only these are stored, in the site's `localStorage` (readable by scripts of that site, harmless): favourites with their nicknames, your chosen start/end time, and a cache of desk and room names. Reservation ids for Undo live in `sessionStorage` (this tab only).
 - Safeguards: every value is validated before it is sent; the desk list, names and timezones from the server are checked for shape; the reservation id used by Undo is read from the answer's `id` field and must look like an id; if the availability check fails, nothing is booked.
 - The panel is built without `innerHTML`.
 - Never commit HAR files: they contain a live session token (`*.har` is in `.gitignore`).
