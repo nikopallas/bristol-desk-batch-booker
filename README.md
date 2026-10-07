@@ -61,8 +61,9 @@ The requests are the same platform's, but it is untested outside the author's si
 The **–** button in the panel's corner minimises it (progress stays visible); **+** restores it.
 1. **Days**: click days in the calendar. Click a weekday header (Mo, Tu, …) to toggle that weekday for the whole month.
 2. **Time**: start and end (the desk's local wall-clock time, e.g. 09:00 to 17:00). Your times are remembered for next time.
-3. **Desks**: filter and pick desks in the list (Cmd/Ctrl-click for several). Use ★ to save favourites; pick one desk and type a nickname (e.g. "Window seat") to give it a name of your own. The picked desks are listed by name below the list.
-4. The line above the buttons says how many bookings this makes. The buttons stay greyed out until you have picked days and desks (and while the count is over the limit).
+3. **Desks or rooms**: the switch at the top chooses what you book. For a room, also give the booking a **title**; rooms can be booked in any time slot (quarter hours are fine). The same favourites, nicknames, free check and undo work for rooms. Rooms are an addition built from one captured booking and are less tested than desks: try one booking first.
+4. **Desks / rooms list**: filter and pick desks in the list (Cmd/Ctrl-click for several). Use ★ to save favourites; pick one desk and type a nickname (e.g. "Window seat") to give it a name of your own. The picked desks are listed by name below the list.
+4. The line above the buttons says how many bookings this makes. The buttons stay greyed out until you have picked days and desks.
 5. **Check free** shows which desk/day combinations are already taken. Nothing is booked.
 6. **Book all** skips taken desks, then books one after the other (no confirm dialog: check the "N bookings" line above the buttons first) ("Booking 2 of 5…"). **Stop** ends the run before the next booking.
 7. **Undo bookings** cancels everything this tool booked in this browser tab (it also works after a reload).

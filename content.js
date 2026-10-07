@@ -56,10 +56,11 @@
     if (typeof value === "string" && /^[\d.]+$/.test(value) && isSiteApiUrl(url)) siteVersion = value;
   }
 
-  // Desk names by code, e.g. { 660: "3.210-028, Main Building, Third Floor" }.
-  // Filled once we know which desks your account can see (see rememberDesks below).
+  // Names by code, e.g. { 660: "3.210-028, Main Building, Third Floor" }, for desks AND rooms.
+  // Filled once we know which desks and rooms your account can see (see rememberDesks below).
   const deskNames = Object.create(null); // no prototype: a hostile key like "__proto__" is just a key
   const deskTimezones = Object.create(null); // timezone of each desk, e.g. { 660: "GMT Standard Time" }
+  const placeKinds = Object.create(null); // "desk" or "room" for each code in deskNames
   const timezoneOf = (tableId) => deskTimezones[tableId] || DEFAULT_TIMEZONE;
   let deskCountSeen = 0;
 
@@ -75,11 +76,14 @@
       for (const [code, zone] of Object.entries(saved.timezones).slice(0, 3000)) {
         if (/^\d{1,6}$/.test(code) && typeof zone === "string" && /^[\w .+-]{1,64}$/.test(zone)) deskTimezones[code] = zone;
       }
+      for (const [code, kind] of Object.entries(saved.kinds || {}).slice(0, 3000)) {
+        if (/^\d{1,6}$/.test(code) && (kind === "desk" || kind === "room")) placeKinds[code] = kind;
+      }
     } catch {} // nothing saved yet, or unreadable: we simply ask the site
   }
   function saveDeskCache() {
     try {
-      localStorage.setItem(DESK_CACHE_KEY, JSON.stringify({ names: deskNames, timezones: deskTimezones }));
+      localStorage.setItem(DESK_CACHE_KEY, JSON.stringify({ names: deskNames, timezones: deskTimezones, kinds: placeKinds }));
     } catch {}
   }
   loadDeskCache();
@@ -96,8 +100,8 @@
     if (token && url.includes("SaveUserProfile")) rememberDesks(body);
   }
 
-  // The site saves your profile on every page load. It contains your user id and the list of
-  // desk codes your account may book (the "desk search" filter, form 1). We reuse both.
+  // The site saves your profile on every page load. It contains your user id, the list of desk codes
+  // your account may book (the "desk search" filter, form 1) and the list of rooms (form 3). We reuse these.
   function rememberDesks(body) {
     let profile;
     try {
@@ -106,13 +110,19 @@
       return; // not the shape we expect: ignore
     }
     if (Number.isInteger(profile.uid)) userId = profile.uid;
-    const ids = profile.cfk1 && profile.cfk1.locationfilter;
-    if (!Array.isArray(ids) || ids.length === deskCountSeen) return; // nothing new
-    deskCountSeen = ids.length;
-    lookupNames(ids.filter(Number.isInteger))
+    const deskList = profile.cfk1 && profile.cfk1.locationfilter;
+    const roomList = profile.cfk3 && profile.cfk3.locationfilter;
+    if (!Array.isArray(deskList)) return;
+    const deskIds = deskList.filter(Number.isInteger);
+    const roomIds = Array.isArray(roomList) ? roomList.filter(Number.isInteger) : [];
+    if (deskIds.length + roomIds.length === deskCountSeen) return; // nothing new
+    deskCountSeen = deskIds.length + roomIds.length;
+    lookupNames([...new Set([...deskIds, ...roomIds])]) // floors and buildings in the lists get no name and drop out
       .then((names) => {
-        for (const code of Object.keys(deskNames)) delete deskNames[code]; // forget desks you can no longer see
+        for (const code of Object.keys(deskNames)) delete deskNames[code]; // forget places you can no longer see
+        for (const code of Object.keys(placeKinds)) delete placeKinds[code];
         Object.assign(deskNames, names);
+        for (const code of Object.keys(names)) placeKinds[code] = deskIds.includes(Number(code)) ? "desk" : "room";
         saveDeskCache();
         refreshDeskList();
         refreshBookedDays(); // the session is known now, so we can ask for your bookings
@@ -219,8 +229,17 @@
   // "2026-10-06" + "09:00" -> milliseconds of 09:00Z (see the note in buildBooking)
   const wallClockMs = (date, time) => Date.parse(`${date}T${time}:00Z`);
 
+  // The extra form fields the site sends along when booking a ROOM (all empty). Copied from the site's own request.
+  const ROOM_FIELDS = JSON.stringify(Object.fromEntries([
+    "f2b01bd476d5e4d87a9db42f172f6222b", "f012622ba53964a7790b5c8ac4c5d118d", "f9a1f8480087a4621ba041fa93781fa0d",
+    "d2730dbe4efa467e869aab9bbceb3200", "f36f98f7abb314d92adc6bfae0553abd3", "f1373dcae50054dd69bb32ea14fd14c3f",
+    "d5982600bffa48d18f3e09177278f579",
+  ].map((name) => [name, null])));
+
   // date = "2026-10-06", start / end = "09:00", tableId = 660, tableName = "3.210-028, ..."
-  function buildBooking(date, start, end, tableId, tableName) {
+  // kind = "desk" or "room"; title = the meeting title (rooms only; desks get "Desk Booking: <name>").
+  function buildBooking(date, start, end, tableId, tableName, kind = "desk", title = "") {
+    const isRoom = kind === "room";
     // The site wants the WALL-CLOCK time written as if it were UTC ("09:00" -> 09:00Z) and then
     // converts it itself using the "timezone" field below (in summer it stores 08:00Z = 09:00 BST).
     // So we must NOT use the browser's own timezone here. (Checked against the HAR.)
@@ -235,7 +254,7 @@
     WEEKDAY_NAMES.forEach((name, i) => (repeatFlags["repeaton" + name] = i === jsDay));
 
     return {
-      fields: "{}",
+      fields: isRoom ? ROOM_FIELDS : "{}",
       locations: [tableId],
       services: [],
       categories: [],
@@ -248,9 +267,9 @@
       customcleanuptime: 0,
       custompreparationtime: 0,
       orders: [],
-      subject: `Desk Booking: ${tableName}`, // same title the site uses
+      subject: isRoom ? title : `Desk Booking: ${tableName}`, // desks: same title the site uses
       exceptions: [],
-      showTimeAsFree: true,
+      showTimeAsFree: !isRoom, // the site shows a booked room as busy, a booked desk as free
       reservationType: 0,
       privacy: 4,
       hosts: [userId],
@@ -280,12 +299,12 @@
   }
 
   // Sends the booking. Uses the ORIGINAL fetch so our own request isn't inspected by our wrapper.
-  async function sendBooking(date, start, end, tableId, tableName) {
+  async function sendBooking(date, start, end, tableId, tableName, kind, title) {
     requireSession();
     const response = await originalFetch("/Services/ReservationsWS.svc/Save6", {
       method: "POST",
       headers: { "content-type": "application/json", "smartway2-version": siteVersion },
-      body: JSON.stringify(buildBooking(date, start, end, tableId, tableName)),
+      body: JSON.stringify(buildBooking(date, start, end, tableId, tableName, kind, title)),
     });
     forgetTokenIfRejected(response.status);
     return { status: response.status, text: await response.text() };
@@ -330,7 +349,7 @@
     for (const reservation of JSON.parse(text)) {
       if (reservation.deleted || !Array.isArray(reservation.locations)) continue;
       // Only desks count (not meeting rooms etc.): the location must be one of our known desks.
-      const deskCode = reservation.locations.find((code) => deskNames[code]);
+      const deskCode = reservation.locations.find((code) => deskNames[code] && placeKinds[code] === "desk");
       if (deskCode !== undefined) return deskNames[deskCode];
     }
     return null;
@@ -416,6 +435,9 @@
 
   const checkTable = (text) => (/^\d{1,6}$/.test(text) ? null : `"${text}" is not a table code (digits only)`);
 
+  // The meeting title of a room booking: 1 to 80 characters, no control characters.
+  const checkTitle = (title) => (/^[^\u0000-\u001f\u007f]{1,80}$/.test(title) ? null : "Please give the room booking a title (up to 80 characters)");
+
   function checkTimes(start, end) {
     if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) return "Please fill in both times";
     if (!Number.isFinite(wallClockMs("2000-01-01", start)) || !Number.isFinite(wallClockMs("2000-01-01", end))) return "Those are not real times";
@@ -466,6 +488,9 @@
     .muted { background:var(--fill); color:var(--muted); border-color:transparent; font-size:12px }
     .wide { width:100% }
 
+    .tabs { display:flex; gap:4px; margin-top:12px; padding:3px; background:var(--fill); border-radius:10px }
+    .tab { flex:1; background:none; color:var(--muted); font-weight:600 }
+    .tab.on { background:#fff; color:var(--text); box-shadow:0 1px 3px rgba(0,0,0,.12) }
     .header { display:flex; justify-content:space-between; align-items:center }
     .header b { font-size:15px; font-weight:600 }
     .section { margin-top:16px }
@@ -521,6 +546,11 @@
     };
     startInput.onchange = endInput.onchange = saveTimes;
     const calendar = el("div");
+    let mode = "desk"; // what we book: "desk" or "room"
+    const noun = () => (mode === "room" ? "room" : "desk");
+    const deskTab = el("button", { className: "tab on", textContent: "Desks" });
+    const roomTab = el("button", { className: "tab", textContent: "Rooms" });
+    const titleInput = el("input", { className: "wide", value: "Meeting", maxLength: 80, placeholder: "What is the booking for?" });
     // Greyed out (class "muted"): normally there is no need to touch it.
     const tablesInput = el("input", { className: "wide muted", placeholder: "filled in from your picks above" });
     const deskFilter = el("input", { className: "wide", placeholder: "Filter desks, e.g. 3.210-0" });
@@ -549,22 +579,28 @@
     const section = (label, ...children) =>
       el("div", { className: "section" }, el("span", { className: "label", textContent: label }), ...children);
 
+    const titleSection = section("Title (shown on the booking)", titleInput);
+    titleSection.hidden = true; // only rooms have a title
+    const placesSection = section("Desks", el("div", { className: "hint", textContent: "Cmd/Ctrl-click to pick several." }), deskFilter, deskSelect,
+      el("div", { className: "row" }, el("label", {}, onlyFavouritesBox, " favourites only"), pickFavouritesButton, favouriteButton),
+      el("div", { className: "row" }, nicknameInput, nicknameButton),
+      pickedSummary);
+
     const body = el("div"); // everything except the header and status line, so minimising is one hidden flag
     body.append(
+      el("div", { className: "tabs" }, deskTab, roomTab),
       section("Days", el("div", { className: "hint", textContent: "Click days. Click Mo, Tu, ... to pick that weekday all month. Green = you already have a desk." }), calendar),
       section("Time (desk's local time)", "From ", startInput, " to ", endInput),
-      section("Desks", el("div", { className: "hint", textContent: "Cmd/Ctrl-click to pick several." }), deskFilter, deskSelect,
-        el("div", { className: "row" }, el("label", {}, onlyFavouritesBox, " favourites only"), pickFavouritesButton, favouriteButton),
-        el("div", { className: "row" }, nicknameInput, nicknameButton),
-        pickedSummary),
-      section("Desk codes", tablesInput),
+      placesSection,
+      titleSection,
+      section("Codes (filled in from your picks)", tablesInput),
       el("div", { className: "section" }, planSummary,
         el("div", { className: "row" }, checkButton, bookButton, stopButton, undoButton),
         el("div", { className: "row" }, checkInButton), el("div", { className: "hint", textContent: "Anything open for check-in is checked in automatically every minute while this page is open." })),
       logBox
     );
     box.append(
-      el("div", { className: "header" }, el("b", { textContent: "Batch desk booking" }), minimiseButton),
+      el("div", { className: "header" }, el("b", { textContent: "Batch booking" }), minimiseButton),
       loadingLine, statusLine, body
     );
     minimiseButton.onclick = () => {
@@ -596,8 +632,8 @@
       const desks = splitList(tablesInput.value).length;
       const count = days * desks;
       const ready = count > 0;
-      if (count === 0) planSummary.textContent = "Pick at least one day and one desk.";
-      else planSummary.textContent = `${days} day(s) x ${desks} desk(s) = ${count} booking(s).`;
+      if (count === 0) planSummary.textContent = `Pick at least one day and one ${noun()}.`;
+      else planSummary.textContent = `${days} day(s) x ${desks} ${noun()}(s) = ${count} booking(s).`;
       bookButton.disabled = checkButton.disabled = busy || !ready;
       undoButton.disabled = checkInButton.disabled = busy;
     }
@@ -751,7 +787,7 @@
     const showPickedInCodesField = () => {
       tablesInput.value = [...pickedCodes].join(", ");
       const names = [...pickedCodes].map(deskLabel);
-      pickedSummary.textContent = names.length ? `${names.length} picked: ${names.join("; ")}` : "No desks picked yet.";
+      pickedSummary.textContent = names.length ? `${names.length} picked: ${names.join("; ")}` : `No ${noun()}s picked yet.`;
       nicknameInput.value = pickedCodes.size === 1 ? favourites.get([...pickedCodes][0]) || "" : "";
       refreshButtons();
     };
@@ -760,6 +796,7 @@
     refreshDeskList = () => {
       const filter = deskFilter.value.toLowerCase();
       const desks = Object.entries(deskNames)
+        .filter(([code]) => placeKinds[code] === mode)
         .filter(([code, name]) => deskLabel(code).toLowerCase().includes(filter))
         .filter(([code]) => !onlyFavouritesBox.checked || favourites.has(code))
         .sort((a, b) => {
@@ -768,6 +805,10 @@
         });
       if (Object.keys(deskNames).length === 0) {
         deskSelect.replaceChildren(el("option", { textContent: "Loading your desks... (reload the page if this stays empty)", disabled: true }));
+        return;
+      }
+      if (desks.length === 0 && !filter && !onlyFavouritesBox.checked) {
+        deskSelect.replaceChildren(el("option", { textContent: `No ${noun()}s found for your account.`, disabled: true }));
         return;
       }
       deskSelect.replaceChildren(
@@ -793,12 +834,12 @@
       refreshDeskList();
     };
     pickFavouritesButton.onclick = () => {
-      favourites.forEach((nickname, code) => deskNames[code] && pickedCodes.add(code)); // only desks that exist
+      favourites.forEach((nickname, code) => placeKinds[code] === mode && pickedCodes.add(code)); // only places of this kind that exist
       showPickedInCodesField();
       refreshDeskList();
     };
     nicknameButton.onclick = () => {
-      if (pickedCodes.size !== 1) return log("Pick exactly one desk in the list first, then type its nickname.", "skip");
+      if (pickedCodes.size !== 1) return log(`Pick exactly one ${noun()} in the list first, then type its nickname.`, "skip");
       const code = [...pickedCodes][0];
       favourites.set(code, nicknameInput.value.trim().slice(0, 40)); // also makes it a favourite
       saveFavourites();
@@ -807,6 +848,22 @@
     };
     refreshDeskList();
     showPickedInCodesField();
+
+    // ----- desks or rooms -----
+    function setMode(newMode) {
+      mode = newMode;
+      pickedCodes.clear(); // codes of desks and rooms differ, so start the pick fresh
+      deskTab.className = mode === "desk" ? "tab on" : "tab";
+      roomTab.className = mode === "room" ? "tab on" : "tab";
+      placesSection.firstChild.textContent = mode === "room" ? "Rooms" : "Desks";
+      deskFilter.placeholder = mode === "room" ? "Filter rooms by name" : "Filter desks, e.g. 3.210-0";
+      nicknameInput.placeholder = `Nickname for the picked ${noun()}, e.g. ${mode === "room" ? "Team room" : "Window seat"}`;
+      titleSection.hidden = mode !== "room";
+      showPickedInCodesField();
+      refreshDeskList();
+    }
+    deskTab.onclick = () => setMode("desk");
+    roomTab.onclick = () => setMode("room");
 
     // ----- undo -----
     // Reservation ids made by this tool in this browser tab. sessionStorage keeps them across a reload
@@ -894,13 +951,15 @@
       const tables = [...new Set(splitList(tablesInput.value).map((code) => (/^\d{1,6}$/.test(code) ? String(Number(code)) : code)))];
       const start = startInput.value;
       const end = endInput.value;
+      const title = titleInput.value.trim();
 
       const problems = [
         ...dates.map(checkDate),
         ...tables.map(checkTable),
         checkTimes(start, end),
+        mode === "room" ? checkTitle(title) : null,
         dates.length === 0 ? "Pick at least one date in the calendar" : null,
-        tables.length === 0 ? "Pick at least one table" : null,
+        tables.length === 0 ? `Pick at least one ${noun()}` : null,
       ].filter(Boolean);
       if (problems.length) return problems.forEach((problem) => log(problem, "fail"));
 
@@ -909,7 +968,7 @@
       try {
         for (const table of tables) {
           tableNames[table] = await lookupTableName(Number(table));
-          if (!tableNames[table]) return log(`Desk code ${table} was not found. Pick desks from the list instead.`, "fail");
+          if (!tableNames[table]) return log(`Code ${table} was not found. Pick from the list instead.`, "fail");
         }
       } catch (error) {
         return log(`Could not look up the desks (${redact(error)}). Reload the page and try again.`, "fail");
@@ -921,7 +980,7 @@
       }
 
       const jobs = tables.flatMap((table) => dates.map((date) => ({ table: Number(table), name: tableNames[table], date })));
-      return { dates, tables, start, end, tableNames, jobs };
+      return { dates, tables, start, end, tableNames, jobs, kind: mode, title };
     }
 
     // Asks the site which jobs are already reserved. Returns a Set of "table|date" keys.
@@ -975,7 +1034,7 @@
           return log(`Could not check availability, so nothing was booked (${redact(error)}). Reload the page and try again.`, "fail");
         }
         setStatus("");
-        if (jobs.length === 0) return log("Nothing left to book: every desk is taken. Try other days or desks.");
+        if (jobs.length === 0) return log(`Nothing left to book: every ${noun()} is taken. Try other days or ${noun()}s.`);
 
         // Send one request at a time, and be gentle with the site:
         // - if it says "too many requests" (HTTP 429) we wait longer and try the same booking again
@@ -992,7 +1051,7 @@
         async function bookOne(job) {
           for (let attempt = 0; attempt <= MAX_RETRIES_WHEN_THROTTLED; attempt++) {
             try {
-              const { status, text } = await sendBooking(job.date, plan.start, plan.end, job.table, job.name);
+              const { status, text } = await sendBooking(job.date, plan.start, plan.end, job.table, job.name, plan.kind, plan.title);
               const id = readReservationId(text);
               if (status === 200 && id) {
                 log(`Booked ${job.date}  ${job.name}`, "ok");
