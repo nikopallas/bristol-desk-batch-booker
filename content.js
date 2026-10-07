@@ -456,6 +456,23 @@
 
     const startInput = el("input", { type: "time", value: "09:00" });
     const endInput = el("input", { type: "time", value: "17:00" });
+
+    // Your usual working hours are remembered (in this site's localStorage), so a reload keeps them.
+    const TIMES_KEY = "deskBatchBooker.times";
+    try {
+      const saved = JSON.parse(localStorage.getItem(TIMES_KEY));
+      // Only accept real "HH:MM" values, in case the stored text was changed by something else.
+      if (saved && /^\d{2}:\d{2}$/.test(saved.start) && /^\d{2}:\d{2}$/.test(saved.end)) {
+        startInput.value = saved.start;
+        endInput.value = saved.end;
+      }
+    } catch {} // storage blocked or broken: keep 09:00 to 17:00
+    const saveTimes = () => {
+      try {
+        localStorage.setItem(TIMES_KEY, JSON.stringify({ start: startInput.value, end: endInput.value }));
+      } catch {}
+    };
+    startInput.onchange = endInput.onchange = saveTimes;
     const calendar = el("div");
     // Greyed out (class "muted"): normally there is no need to touch it.
     const tablesInput = el("input", { className: "wide muted", placeholder: "filled in from your picks above" });
