@@ -323,7 +323,7 @@
 
   // ---------- Section 3: validation ----------
   const MAX_BOOKINGS_PER_RUN = 20; // safety cap
-  const MAX_DAYS_AHEAD = 60;
+  const MAX_DAYS_AHEAD = 120;
   const PAUSE_BETWEEN_REQUESTS_MS = 800;
 
   const splitList = (text) => [...new Set(text.split(/[\s,]+/).filter(Boolean))]; // also removes duplicates

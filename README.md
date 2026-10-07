@@ -69,7 +69,7 @@ The **–** button in the panel's corner minimises it (progress stays visible); 
 8. **Check-in is automatic**: every minute, while the booking page is open, everything open for check-in is checked in. **Check in now** does it immediately.
 
 ## Safety limits (on purpose)
-- At most 20 bookings per run, dates at most 60 days ahead, none in the past.
+- At most 20 bookings per run, dates at most 120 days ahead, none in the past.
 - One request at a time with a short pause; the run stops at the first failed booking.
 - Booking has no confirm dialog: use **Check free** first, **Stop** to interrupt, and **Undo bookings** to cancel. Undoing does ask first.
 - Please check the university's terms before booking many desks; don't hold desks you won't use.
