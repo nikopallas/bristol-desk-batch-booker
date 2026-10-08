@@ -331,9 +331,9 @@
     return new Set(JSON.parse(text).map((row) => String(row.locationid)));
   }
 
-  // Which desk (name) do you have on one day, or null? Same request the site's own agenda makes
-  // ("my reservations", range 1 = one day). dayStart is local midnight of that day as an ISO time.
-  async function loadMyDeskOfDay(dayStart) {
+  // Your bookings on one day: [{ kind: "desk" | "room", name, when: "10:00-11:00" }, ...]. Same request the site's
+  // own agenda makes ("my reservations", range 1 = one day). dayStart is local midnight of that day as an ISO time.
+  async function loadMyBookingsOfDay(dayStart) {
     requireSession();
     const response = await originalFetch("/webapi/reservations/loadreservationoccurrences", {
       method: "POST",
@@ -346,13 +346,16 @@
     forgetTokenIfRejected(response.status);
     const text = await response.text();
     if (!response.ok) throw new Error(`could not load your bookings: HTTP ${response.status}`);
+    const clock = (iso) => new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    const found = [];
     for (const reservation of JSON.parse(text)) {
       if (reservation.deleted || !Array.isArray(reservation.locations)) continue;
-      // Only desks count (not meeting rooms etc.): the location must be one of our known desks.
-      const deskCode = reservation.locations.find((code) => deskNames[code] && placeKinds[code] === "desk");
-      if (deskCode !== undefined) return deskNames[deskCode];
+      // Only known desks and rooms count: the location must be one of the places we know.
+      const code = reservation.locations.find((place) => deskNames[place] && placeKinds[place]);
+      if (code === undefined) continue;
+      found.push({ kind: placeKinds[code], name: deskNames[code], when: `${clock(reservation.startdate)}-${clock(reservation.enddate)}` });
     }
-    return null;
+    return found;
   }
 
   // The id of the new reservation is the top-level "id" of the Save6 answer (e.g. "E8ZYS").
@@ -537,7 +540,10 @@
     .day:hover:not(:disabled) { background:var(--accent-soft); filter:none }
     .day.booked { background:#e6f4ea; color:var(--good); font-weight:600 }
     .day.booked:hover:not(:disabled) { background:#d2ebd9 }
+    .day.rooms { position:relative; font-weight:600 } /* rooms: a small green dot under the number */
+    .day.rooms::after { content:""; position:absolute; bottom:3px; left:50%; width:5px; height:5px; margin-left:-2.5px; border-radius:50%; background:var(--good) }
     .day.on { background:var(--accent); color:#fff; font-weight:600 }
+    .day.on.rooms::after { background:#fff }
     .day.on.booked { box-shadow:inset 0 0 0 2px var(--good) } /* picked AND already booked: indigo with a green ring */
     .day:disabled { color:#c7c7cc; opacity:1 }
 
@@ -578,6 +584,8 @@
     startInput.onchange = endInput.onchange = saveTimes;
     const calendar = el("div");
     let mode = "desk"; // what we book: "desk" or "room"
+    const DAYS_HINT = "Click days, or Mo, Tu, ... for that weekday all month. ";
+    const daysHint = el("div", { className: "hint", textContent: DAYS_HINT + "Green = you already have a desk." });
     const noun = () => (mode === "room" ? "room" : "desk");
     const deskTab = el("button", { className: "tab on", textContent: "Desks" });
     const roomTab = el("button", { className: "tab", textContent: "Rooms" });
@@ -624,7 +632,7 @@
     const body = el("div", { className: "body" }); // everything except the header and status line, so minimising is one hidden flag
     body.append(
       el("div", { className: "tabs" }, deskTab, roomTab),
-      section("Days", calendar, el("div", { className: "hint", textContent: "Click days, or Mo, Tu, ... for that weekday all month. Green = you already have a desk." })),
+      section("Days", calendar, daysHint),
       section("Time (desk's local time)", el("div", { className: "row time" }, startInput, el("span", { className: "hint", textContent: "to" }), endInput)),
       placesSection,
       titleSection,
@@ -697,7 +705,7 @@
 
     // Days on which you already have a desk: "2026-10-07" -> desk name. Filled by asking the site,
     // one request per day of the shown month (only days we haven't asked about yet, only once).
-    const myDeskByDate = new Map();
+    const myBookingsByDate = new Map(); // "2026-10-07" -> [{ kind, name, when }, ...]
     const askedDays = new Set();
     let askingNow = false;
 
@@ -717,8 +725,8 @@
           if (pending.length === 0) break;
           await mapParallel(pending, 4, async ({ text, day }) => {
             if (firstOfShownMonth.getMonth() !== month) return; // you moved to another month: start over there
-            const name = await loadMyDeskOfDay(new Date(year, month, day).toISOString());
-            if (name) myDeskByDate.set(text, name);
+            const found = await loadMyBookingsOfDay(new Date(year, month, day).toISOString());
+            if (found.length) myBookingsByDate.set(text, found);
             askedDays.add(text);
           });
           drawCalendar();
@@ -733,7 +741,7 @@
 
     // After Undo we no longer know which days changed, so ask again.
     const forgetMyDeskDays = () => {
-      myDeskByDate.clear();
+      myBookingsByDate.clear();
       askedDays.clear();
       drawCalendar();
     };
@@ -766,12 +774,14 @@
       for (let i = 0; i < blanksBeforeFirst; i++) cells.push(el("span"));
       for (let day = 1; day <= daysInMonth; day++) {
         const text = dateText(day);
-        const classes = ["day", selectedDates.has(text) && "on", myDeskByDate.has(text) && "booked"];
+        // Desks mode: green when you have a desk that day. Rooms mode: a dot when you have a room (you can have several).
+        const mine = (myBookingsByDate.get(text) || []).filter((booking) => booking.kind === mode);
+        const classes = ["day", selectedDates.has(text) && "on", mine.length && (mode === "room" ? "rooms" : "booked")];
         const button = el("button", {
           className: classes.filter(Boolean).join(" "),
           textContent: day,
           disabled: !bookable(day),
-          title: myDeskByDate.has(text) ? `You already have a desk: ${myDeskByDate.get(text)}` : "",
+          title: mine.length ? (mode === "room" ? "Your rooms:\n" : "You already have a desk: ") + mine.map((b) => (mode === "room" ? `${b.when}  ${b.name}` : b.name)).join("\n") : "",
         });
         button.onclick = () => {
           if (selectedDates.has(text)) selectedDates.delete(text);
@@ -924,6 +934,8 @@
       deskFilter.placeholder = mode === "room" ? "Filter rooms by name" : "Filter desks, e.g. 3.210-0";
       editingCode = null;
       titleSection.hidden = mode !== "room";
+      daysHint.textContent = DAYS_HINT + (mode === "room" ? "Dot = you already have a room that day (hover for times)." : "Green = you already have a desk.");
+      drawCalendar(); // the marks differ between desks and rooms
       showPickedInCodesField();
       refreshDeskList();
     }
@@ -1120,7 +1132,9 @@
               const id = readReservationId(text);
               if (status === 200 && id) {
                 log(`Booked ${job.date}  ${job.name}`, "ok");
-                myDeskByDate.set(job.date, job.name); // turns the day green
+                const list = myBookingsByDate.get(job.date) || [];
+                list.push({ kind: plan.kind, name: job.name, when: `${plan.start}-${plan.end}` }); // marks the day
+                myBookingsByDate.set(job.date, list);
                 bookedIds.push(id);
                 updateUndoButton();
                 return true;
