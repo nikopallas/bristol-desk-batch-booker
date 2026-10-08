@@ -70,7 +70,7 @@ The **–** button in the panel's corner minimises it (progress stays visible); 
 1. Pick **Desks** or **Rooms** with the switch at the top.
 2. **Days**: click days in the calendar. Click a weekday header (Mo, Tu, …) to toggle that weekday for the whole month. Green days are days where you already have a desk.
 3. **Time**: start and end (the place's local wall-clock time, e.g. 09:00 to 17:00; rooms can use any quarter hour). Your times are remembered for next time.
-4. **Desks / rooms**: filter and pick in the list (Cmd/Ctrl-click for several). Open **Favourites & nicknames** under the list to save favourites with ★; pick one and type a nickname (e.g. "Window seat") to give it a name of your own. The greyed **Codes** field is folded away (you rarely need it).
+4. **Desks / rooms**: the filter, the **★ only** chip and **Pick all favourites** sit on top of the list. Click a row to pick it (no Cmd/Ctrl needed). Hover a row for **★** (favourite) and **✎** (nickname, e.g. "Window seat": Enter saves, Esc cancels). The greyed **Codes** field is folded away (you rarely need it).
 5. **Rooms only:** give the booking a **title**. Rooms are an addition built from one captured booking and are less tested than desks: try a single booking first.
 6. The line above the buttons says how many bookings this makes. The buttons stay greyed out until you have picked days and something to book.
 7. **Check free** shows which combinations are already taken. Nothing is booked.

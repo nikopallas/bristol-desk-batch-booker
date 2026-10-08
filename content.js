@@ -485,9 +485,23 @@
 
     input, select { font:inherit; color:inherit; box-sizing:border-box; border:1px solid var(--line); border-radius:var(--radius); padding:5px 8px; background:#fff }
     input:focus, select:focus { outline:2px solid var(--accent-soft); border-color:var(--accent) }
-    select { padding:3px }
-    option { padding:2px 6px; border-radius:6px }
-    option:checked { background:var(--accent) linear-gradient(0deg, var(--accent), var(--accent)); color:#fff }
+    /* the list of desks / rooms: one row each, actions appear on hover */
+    .places { max-height:170px; overflow:auto; margin-top:6px; padding:2px; border:1px solid var(--line); border-radius:var(--radius) }
+    .place { display:flex; align-items:center; gap:8px; min-height:30px; padding:2px 6px; border-radius:6px; cursor:pointer }
+    .place:hover { background:var(--fill) }
+    .place.on { background:var(--accent-soft) }
+    .place input[type=checkbox] { flex:none; margin:0; accent-color:var(--accent) }
+    .place-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+    .official { color:var(--muted); font-size:12px }
+    .place-actions { flex:none; display:flex; gap:2px }
+    .act { width:24px; height:24px; padding:0; line-height:1; background:none; color:var(--muted); border-radius:6px; opacity:0 }
+    .place:hover .act, .place:focus-within .act, .act.fav { opacity:1 }
+    @media (hover: none) { .act { opacity:1 } } /* touch screens have no hover */
+    .act:hover:not(:disabled) { background:var(--line); color:var(--text); filter:none }
+    .act.fav { color:#e8a317 }
+    .place-edit { flex:1; min-width:0 }
+    .empty { padding:8px }
+    .chip { display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border-radius:999px; background:var(--fill); font-size:12px; cursor:pointer }
     .muted { background:var(--fill); color:var(--muted); border-color:transparent; font-size:12px }
     .wide { width:100% }
 
@@ -571,13 +585,10 @@
     // Greyed out (class "muted"): normally there is no need to touch it.
     const tablesInput = el("input", { className: "wide muted", placeholder: "filled in from your picks above" });
     const deskFilter = el("input", { className: "wide", placeholder: "Filter desks, e.g. 3.210-0" });
-    const deskSelect = el("select", { className: "wide", multiple: true, size: 6 });
+    const placeList = el("div", { className: "places", title: "Click a row to pick it" }); // one row per desk / room
     const pickedSummary = el("div", { className: "hint picked" });
     const onlyFavouritesBox = el("input", { type: "checkbox" });
-    const favouriteButton = el("button", { className: "link", textContent: "★ Favourite / unfavourite picked", title: "Adds the picked desks to your favourites, or removes them if they all are favourites already" });
     const pickFavouritesButton = el("button", { className: "link", textContent: "Pick all favourites" });
-    const nicknameInput = el("input", { placeholder: "Nickname for the picked desk, e.g. Window seat", maxLength: 40 });
-    const nicknameButton = el("button", { className: "link", textContent: "Save nickname", title: "Gives the one picked desk a nickname (and makes it a favourite). Empty = remove the nickname." });
     const bookButton = el("button", { className: "primary", textContent: "Book all", title: "Books every picked desk on every picked day" });
     const checkButton = el("button", { textContent: "Check free", title: "Shows which desks are already taken. Books nothing." });
     const checkInButton = el("button", { className: "link", textContent: "Check in now", title: "Checks in everything that is open for check-in" });
@@ -603,12 +614,12 @@
       el("details", { className: "more" }, el("summary", { textContent: summaryText }), ...children);
 
     // The first child must stay the label: setMode() renames it to "Desks" / "Rooms".
-    const placesSection = section("Desks", deskFilter, deskSelect, el("div", { className: "hint", textContent: "Cmd/Ctrl-click to pick several." }),
-      el("div", { className: "row between" }, el("label", {}, onlyFavouritesBox, " favourites only"), pickFavouritesButton),
-      pickedSummary,
-      disclosure("Favourites & nicknames",
-        el("div", { className: "row" }, favouriteButton),
-        el("div", { className: "row" }, nicknameInput, nicknameButton)));
+    const placesSection = section("Desks",
+      deskFilter,
+      el("div", { className: "row between" }, el("label", { className: "chip" }, onlyFavouritesBox, "★ only"), pickFavouritesButton),
+      placeList,
+      el("div", { className: "hint", textContent: "Click to pick. Hover a row for ★ favourite and ✎ nickname." }),
+      pickedSummary);
 
     const body = el("div", { className: "body" }); // everything except the header and status line, so minimising is one hidden flag
     body.append(
@@ -812,61 +823,91 @@
       tablesInput.value = [...pickedCodes].join(", ");
       const names = [...pickedCodes].map(deskLabel);
       pickedSummary.textContent = names.length ? `${names.length} picked: ${names.join("; ")}` : `No ${noun()}s picked yet.`;
-      nicknameInput.value = pickedCodes.size === 1 ? favourites.get([...pickedCodes][0]) || "" : "";
       refreshButtons();
     };
     tablesInput.oninput = refreshButtons; // you may still type codes by hand
 
+    let editingCode = null; // the row whose nickname is being edited, if any
+
+    function toggleFavourite(code) {
+      if (favourites.has(code)) favourites.delete(code); // this also drops its nickname
+      else favourites.set(code, "");
+      saveFavourites();
+      showPickedInCodesField();
+      refreshDeskList();
+    }
+
+    // The row while you rename: a small text box. Enter or leaving the box saves, Esc cancels.
+    function nicknameEditor(code) {
+      const input = el("input", { className: "place-edit", value: favourites.get(code) || "", maxLength: 40, placeholder: "Nickname (Enter = save, Esc = cancel)" });
+      let finished = false; // leaving the box fires again after we redraw: only finish once
+      const finish = (save) => {
+        if (finished) return;
+        finished = true;
+        editingCode = null;
+        if (save) {
+          const nickname = input.value.trim().slice(0, 40);
+          if (nickname || favourites.has(code)) favourites.set(code, nickname); // a nickname makes it a favourite; empty removes the nickname
+          saveFavourites();
+        }
+        showPickedInCodesField();
+        refreshDeskList();
+      };
+      input.onkeydown = (event) => {
+        if (event.key === "Enter") finish(true);
+        else if (event.key === "Escape") finish(false);
+      };
+      input.onblur = () => finish(true);
+      return el("div", { className: "place" }, input);
+    }
+
+    // One row: checkbox + name, and on hover the star and pencil. A <label> makes the whole row clickable.
+    function placeRow(code) {
+      if (code === editingCode) return nicknameEditor(code);
+      const isFavourite = favourites.has(code);
+      const nickname = favourites.get(code);
+      const box = el("input", { type: "checkbox", checked: pickedCodes.has(code) });
+      const row = el("label", { className: pickedCodes.has(code) ? "place on" : "place" });
+      box.onchange = () => {
+        if (box.checked) pickedCodes.add(code);
+        else pickedCodes.delete(code);
+        row.classList.toggle("on", box.checked);
+        showPickedInCodesField();
+      };
+      const name = el("span", { className: "place-name" },
+        nickname ? el("b", { textContent: nickname }) : "", nickname ? " " : "", el("span", { className: nickname ? "official" : "", textContent: deskNames[code] || code }));
+      const star = el("button", { className: isFavourite ? "act fav" : "act", textContent: isFavourite ? "★" : "☆", title: isFavourite ? "Remove from favourites" : "Add to favourites" });
+      const pencil = el("button", { className: "act", textContent: "✎", title: "Give it a nickname" });
+      star.onclick = (event) => { event.preventDefault(); toggleFavourite(code); };
+      pencil.onclick = (event) => { event.preventDefault(); editingCode = code; refreshDeskList(); };
+      row.append(box, name, el("span", { className: "place-actions" }, star, pencil));
+      return row;
+    }
+
     refreshDeskList = () => {
       const filter = deskFilter.value.toLowerCase();
-      const desks = Object.entries(deskNames)
+      const places = Object.entries(deskNames)
         .filter(([code]) => placeKinds[code] === mode)
-        .filter(([code, name]) => deskLabel(code).toLowerCase().includes(filter))
+        .filter(([code]) => deskLabel(code).toLowerCase().includes(filter))
         .filter(([code]) => !onlyFavouritesBox.checked || favourites.has(code))
         .sort((a, b) => {
           const byFavourite = favourites.has(b[0]) - favourites.has(a[0]); // favourites first
           return byFavourite || a[1].localeCompare(b[1], undefined, { numeric: true });
         });
-      if (Object.keys(deskNames).length === 0) {
-        deskSelect.replaceChildren(el("option", { textContent: "Loading your desks... (reload the page if this stays empty)", disabled: true }));
-        return;
-      }
-      if (desks.length === 0 && !filter && !onlyFavouritesBox.checked) {
-        deskSelect.replaceChildren(el("option", { textContent: `No ${noun()}s found for your account.`, disabled: true }));
-        return;
-      }
-      deskSelect.replaceChildren(
-        ...desks.map(([code]) =>
-          el("option", { value: code, textContent: (favourites.has(code) ? "★ " : "") + deskLabel(code), selected: pickedCodes.has(code) })
-        )
-      );
+      const say = (text) => placeList.replaceChildren(el("div", { className: "hint empty", textContent: text }));
+      if (Object.keys(deskNames).length === 0) return say("Loading your desks... (reload the page if this stays empty)");
+      if (places.length === 0) return say(filter || onlyFavouritesBox.checked ? `No ${noun()}s match.` : `No ${noun()}s found for your account.`);
+
+      const scrolled = placeList.scrollTop; // keep your place in the list when a row changes
+      placeList.replaceChildren(...places.map(([code]) => placeRow(code)));
+      placeList.scrollTop = scrolled;
+      const editor = placeList.querySelector(".place-edit");
+      if (editor) editor.focus();
     };
     deskFilter.oninput = onlyFavouritesBox.onchange = refreshDeskList;
-    deskSelect.onchange = () => {
-      for (const option of deskSelect.options) {
-        if (option.selected) pickedCodes.add(option.value);
-        else pickedCodes.delete(option.value);
-      }
-      showPickedInCodesField();
-    };
 
-    favouriteButton.onclick = () => {
-      const picked = [...pickedCodes];
-      const allAreFavourites = picked.length > 0 && picked.every((code) => favourites.has(code));
-      picked.forEach((code) => (allAreFavourites ? favourites.delete(code) : favourites.set(code, favourites.get(code) || "")));
-      saveFavourites();
-      refreshDeskList();
-    };
     pickFavouritesButton.onclick = () => {
       favourites.forEach((nickname, code) => placeKinds[code] === mode && pickedCodes.add(code)); // only places of this kind that exist
-      showPickedInCodesField();
-      refreshDeskList();
-    };
-    nicknameButton.onclick = () => {
-      if (pickedCodes.size !== 1) return log(`Pick exactly one ${noun()} in the list first, then type its nickname.`, "skip");
-      const code = [...pickedCodes][0];
-      favourites.set(code, nicknameInput.value.trim().slice(0, 40)); // also makes it a favourite
-      saveFavourites();
       showPickedInCodesField();
       refreshDeskList();
     };
@@ -881,7 +922,7 @@
       roomTab.className = mode === "room" ? "tab on" : "tab";
       placesSection.firstChild.textContent = mode === "room" ? "Rooms" : "Desks";
       deskFilter.placeholder = mode === "room" ? "Filter rooms by name" : "Filter desks, e.g. 3.210-0";
-      nicknameInput.placeholder = `Nickname for the picked ${noun()}, e.g. ${mode === "room" ? "Team room" : "Window seat"}`;
+      editingCode = null;
       titleSection.hidden = mode !== "room";
       showPickedInCodesField();
       refreshDeskList();
