@@ -70,7 +70,7 @@
   //   3. what the site tells us right now.
   // That way the desk list shows up at once, and the list stays complete even if the site's filters are narrow.
   const DESK_CACHE_KEY = "deskBatchBooker.desks";
-  const SCAN_VERSION = 2; // raise it when the scan changes, so everybody's browser scans again
+  const SCAN_VERSION = 3; // raise it when the scan changes, so everybody's browser scans again
   let placesScanned = false; // true once "Scan all desks and rooms" has run in this browser
 
   // Takes { names, timezones, kinds } from storage or places.js and keeps only well-formed entries.
@@ -205,6 +205,18 @@
 
   const WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
+  // Some places are called just "G.12_001". Add their building and floor ("G.12_001, Howard House, Ground Floor"),
+  // unless the name already says it, so people can tell where a place is.
+  function fullName(name, parents = {}) {
+    let full = name;
+    if (parents.building && !full.includes(parents.building)) full += `, ${parents.building}`;
+    if (parents.floor && !full.includes(parents.floor)) full += `, ${parents.floor}`;
+    return full;
+  }
+
+  // The part of a name that identifies the place, e.g. "3.210-028" in "3.210-028, Main Building, Third Floor".
+  const labelOf = (name) => String(name).split(", ")[0];
+
   // Asks the site for the names of tables (same request the site makes, see the HAR).
   // Returns { 660: "3.210-028, Main Building, Third Floor", ... }.
   // The answer has three rows per code (building, floor, the desk itself);
@@ -229,10 +241,19 @@
       forgetTokenIfRejected(response.status);
       const text = await response.text();
       if (!response.ok || !text) throw new Error(`name lookup failed: HTTP ${response.status}, answer: "${redact(text, 100)}"`);
-      for (const row of JSON.parse(text).view || []) {
+      const rows = JSON.parse(text).view || [];
+      // The answer has up to three rows per code: the place itself (offset 0), its floor (1) and its building (2).
+      const parents = {}; // { code: { building, floor } }
+      for (const row of rows) {
+        if (!Number.isInteger(row.locationid) || typeof row.pname !== "string") continue;
+        parents[row.locationid] = parents[row.locationid] || {};
+        if (row.offset === 2 && row.location_type === "Building") parents[row.locationid].building = row.pname;
+        if (row.offset === 1 && row.location_type === "Floor") parents[row.locationid].floor = row.pname;
+      }
+      for (const row of rows) {
         // Only accept rows of the expected shape (text name, whole-number code).
         if (row.offset === 0 && row.location_type === "Location" && Number.isInteger(row.locationid) && typeof row.name === "string") {
-          names[row.locationid] = row.name;
+          names[row.locationid] = fullName(row.name, parents[row.locationid]);
           if (typeof row.timezone === "string" && /^[\w .+-]{1,64}$/.test(row.timezone)) deskTimezones[row.locationid] = row.timezone;
         }
       }
@@ -317,12 +338,6 @@
       '// Regenerate it with "Codes & list export" in the panel after a full scan, then commit the downloaded file.\n' +
       "window.__DESK_BATCH_PLACES = " + JSON.stringify(data, null, 1) + ";\n"
     );
-  }
-
-  // Name of one table, or null if it doesn't exist. Uses the list we already have if possible.
-  async function lookupTableName(tableId) {
-    if (!deskNames[tableId]) Object.assign(deskNames, await lookupNames([tableId]));
-    return deskNames[tableId] || null;
   }
 
   // "2026-10-06" + "09:00" -> milliseconds of 09:00Z (see the note in buildBooking)
@@ -1188,15 +1203,36 @@
       ].filter(Boolean);
       if (problems.length) return problems.forEach((problem) => log(problem, "fail"));
 
-      // Look up each table's name (this also proves the table exists).
+      // Ask the site for the CURRENT name of every picked code and compare it with the name we have stored
+      // (shipped list or saved list). If a code now means something else (renamed, or reused for another place),
+      // book nothing: you might otherwise book a desk you did not mean. This also proves the code still exists.
       const tableNames = {};
+      let fresh;
       try {
-        for (const table of tables) {
-          tableNames[table] = await lookupTableName(Number(table));
-          if (!tableNames[table]) return log(`Code ${table} was not found. Pick from the list instead.`, "fail");
-        }
+        fresh = await lookupNames(tables.map(Number));
       } catch (error) {
-        return log(`Could not look up the desks (${redact(error)}). Reload the page and try again.`, "fail");
+        return log(`Could not look up the ${noun()}s (${redact(error)}). Reload the page and try again.`, "fail");
+      }
+      const changed = [];
+      for (const table of tables) {
+        const now = fresh[table];
+        if (!now) return log(`Code ${table} is not a ${noun()} on the site any more. Pick from the list instead.`, "fail");
+        const before = deskNames[table];
+        if (before && labelOf(before) !== labelOf(now)) changed.push({ table, before, now });
+        deskNames[table] = tableNames[table] = now; // keep the stored name up to date
+      }
+      saveDeskCache();
+      showPickedInCodesField(); // the stored names may just have become more complete (building and floor)
+      refreshDeskList();
+      if (changed.length) {
+        for (const { table, before, now } of changed) {
+          log(`Code ${table} used to be "${before}", the site now calls it "${now}". Nothing was booked.`, "fail");
+          pickedCodes.delete(table);
+        }
+        log(`Please pick again from the list, so you book the ${noun()} you mean. The list is updated.`, "fail");
+        showPickedInCodesField();
+        refreshDeskList();
+        return null;
       }
 
       // One availability request covers all desks, so they must share a timezone.

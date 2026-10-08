@@ -77,7 +77,8 @@ The **–** button in the panel's corner minimises it (progress stays visible); 
 5. **Rooms only:** give the booking a **title**. Rooms are an addition built from one captured booking and are less tested than desks: try a single booking first.
 6. The line above the buttons says how many bookings this makes. The buttons stay greyed out until you have picked days and something to book.
 7. **Check free** shows which combinations are already taken. Nothing is booked.
-8. **Book all** skips taken ones, then books one after the other ("Booking 2 of 5…"). There is no confirm dialog, so glance at the "N bookings" line first. **Stop** ends the run before the next booking.
+8. **Before anything is booked or checked**, the extension asks the site for the current name of every picked code and compares it with the stored one. If a code now means a different place (renamed or reused), nothing is booked: the list is updated and you pick again.
+9. **Book all** skips taken ones, then books one after the other ("Booking 2 of 5…"). There is no confirm dialog, so glance at the "N bookings" line first. **Stop** ends the run before the next booking.
 9. **Undo bookings** cancels everything this tool booked in this browser tab (it also works after a reload).
 10. **Check-in is automatic**: every minute, while the booking page is open, everything open for check-in is checked in. **Check in now** does it immediately.
 
