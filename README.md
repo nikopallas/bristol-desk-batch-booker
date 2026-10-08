@@ -13,41 +13,58 @@ git clone https://github.com/nikopallas/bristol-desk-batch-booker.git
 2. Click **Load unpacked** and pick the `bristol-desk-batch-booker` folder (keep the folder, Chrome reads it from there).
 3. Open the booking site, log in, and click around once. A panel appears bottom-right.
 
-**Update:** `git pull`, press the reload arrow on the extension card, reload the booking site.
-
 ## Use
 1. Pick **Desks** or **Rooms** (switch at the top).
 2. Click the **days** (click *Mo, Tu, …* to pick that weekday for the whole month).
 3. Set the **time** (it is remembered).
-4. Pick your **desks or rooms** from the list. Hover a row for **★** (favourite) and **✎** (nickname). Rooms also need a **title**.
+4. Pick your **desks or rooms** from the list. Rooms also need a **title**.
 5. **Check free** shows what is taken. **Book all** books everything that is free, one after the other.
 
-**Good to know**
-- 🟢 A green day = you already have a desk. In Rooms mode a dot marks days with a room (hover for times).
-- **Book all** has no confirm dialog. Read the "N bookings" line above the buttons first. **Stop** ends a run, **Undo bookings** cancels what you just booked (also after a reload).
-- If a code now means a different place than before, nothing is booked and you pick again.
-- **Check-in is automatic** while a booking-site tab is open (**Check in now** does it at once).
-- The full desk and room list ships with the extension. **Scan all desks and rooms** (one time) refreshes your own copy.
+⚠️ **Book all** has no confirm dialog: read the "N bookings" line above the buttons first. **Undo bookings** cancels what you just booked.
 
-## Something wrong?
+---
+
+*Want to know more? Open what interests you:*
+
+<details>
+<summary><b>✨ All the features</b></summary>
+
+- 🟢 **Green days:** you already have a desk that day. In Rooms mode a **dot** marks days with a room; hover for times and names.
+- ★ **Favourites and ✎ nicknames:** hover a row in the list. Nicknames like "Window seat" show next to the official name. **Pick all favourites** and **★ only** are above the list.
+- ⏱ **Remembered times:** your start and end time are kept.
+- ↩ **Undo bookings:** cancels what this tool booked in this tab, even after a reload.
+- ⛔ **Stop:** ends a run before the next booking.
+- ✅ **Auto check-in:** while a booking-site tab is open, everything open for check-in is checked in every minute. **Check in now** does it at once.
+- 📋 **Full list included:** all desks and rooms ship with the extension. **Scan all desks and rooms** (one time, under the list) refreshes your own copy.
+- 🛡 **Code check:** before anything is booked or checked, the picked codes are compared with the site's current names. If a code now means another place, nothing is booked and you pick again.
+- 🐢 **Gentle:** one booking at a time, slows down by itself if the site says "too many requests", stops after two failures in a row.
+- ➖ **Minimise** the panel with the **–** button; progress stays visible.
+</details>
+
+<details>
+<summary><b>🆘 Something wrong?</b></summary>
+
 | Problem | Try |
 |---|---|
 | No panel | Reload the page. Check the extension is on in `chrome://extensions`. |
 | "Connecting…" or "Loading your desks…" forever | Reload the page and click something on it once. |
 | Room list empty | Press **Scan all desks and rooms**, or open the site's own "Book a Room" search once and reload. |
 | A booking fails | Read the red line in the log, it quotes the site's reason. Two failures in a row stop the run. |
-| Panel stuck on an old version | Reload the extension, then the page. |
+| Panel looks old after an update | Reload the extension (circular arrow in `chrome://extensions`), then the page. |
 
-## Safety, in short
-- Reads and books only on the booking site, with your own login. Nothing is sent anywhere else.
-- Your login token stays in memory: never saved, never logged.
-- One booking at a time, with automatic slow-down if the site pushes back.
-- Only favourites, nicknames, your times and the place list are stored (in your browser, harmless).
-- Unofficial tool on an undocumented API: it can break when the site changes, and bulk booking may go against the university's rules. Read `content.js` (one file) before you trust it, and install only from this repo.
+**Update:** `git pull`, reload the extension, reload the booking site.
+**Uninstall:** `chrome://extensions` → Remove.
+</details>
 
 <details>
-<summary>Security notes (what is true and what is not)</summary>
+<summary><b>🛡 Is it safe?</b></summary>
 
+- Talks only to the booking site, with your own login. Nothing is sent anywhere else.
+- Your login token stays in memory: never saved, never logged.
+- Only favourites, nicknames, your times and the place list are stored, in your browser (harmless).
+- It is an unofficial tool on an undocumented API: it can break when the site changes, and bulk booking may go against the university's rules. Read `content.js` (one file) before you trust it, and install only from this repo.
+
+**The honest details**
 - The extension runs in the page's own context (it has to, to see the site's requests). Scripts of the booking site can therefore in principle see what it sees. The site's normal login already exposes the token to them, so this adds little, but it is not a sandbox.
 - The panel sits in a closed shadow root. That only stops accidental interference, it is **not** a security boundary. Buttons react to real clicks only.
 - Server text shown in the panel is shortened and long token-like strings are hidden. The panel is built without `innerHTML`.
@@ -57,7 +74,7 @@ git clone https://github.com/nikopallas/bristol-desk-batch-booker.git
 </details>
 
 <details>
-<summary>How it works (for the curious)</summary>
+<summary><b>🔧 How it works</b></summary>
 
 `content.js` wraps `fetch` / `XMLHttpRequest` to see the session token, your user id and your desk lists in the site's own requests, then replays the same requests the site makes:
 
@@ -76,11 +93,25 @@ Learned the hard way:
 - The site numbers weekdays Monday = 1 … Sunday = 7.
 - A room booking is the same `Save6` as a desk, with the room code, your title, `showTimeAsFree: false` and a few empty form fields.
 - How far ahead you can book is set by the site per user group, so the tool has no limit of its own.
-- `places.js` is the shipped list (codes, names, timezones, kinds). Refresh it after a scan with *Codes & list export → Download the list as places.js* and commit it.
 </details>
 
-## Another Smartway2 site?
-Change the address under `"matches"` in `manifest.json` (e.g. `"https://yourorg.smartway2book.com/*"`) and reload the extension. Untested outside the author's site: try **Check free** first.
+<details>
+<summary><b>📦 The shipped desk and room list (for maintainers)</b></summary>
+
+`places.js` holds codes, names, timezones and kinds (no personal data) so everybody starts with a full list. To refresh it:
+
+1. Press **Scan all desks and rooms** in the panel (one time per browser).
+2. Open **Codes & list export** → **Download the list as places.js**.
+3. Replace `places.js` in the repo with the downloaded file and commit it.
+
+Desk or room is decided by the site's own resource categories (`desk` and `meeting-room`), so Study Spaces, Training Rooms and the like are included. If the scan logic changes, raise `SCAN_VERSION` in `content.js` so everybody's browser offers the scan again.
+</details>
+
+<details>
+<summary><b>🌍 Another Smartway2 site?</b></summary>
+
+Change the address under `"matches"` in `manifest.json` (e.g. `"https://yourorg.smartway2book.com/*"`) and reload the extension. It is untested outside the author's site: try **Check free** first.
+</details>
 
 ## License
 MIT, see [LICENSE](LICENSE). Provided as is, at your own risk.
