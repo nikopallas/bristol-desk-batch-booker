@@ -119,10 +119,12 @@
     deskCountSeen = deskIds.length + roomIds.length;
     lookupNames([...new Set([...deskIds, ...roomIds])]) // floors and buildings in the lists get no name and drop out
       .then((names) => {
-        for (const code of Object.keys(deskNames)) delete deskNames[code]; // forget places you can no longer see
-        for (const code of Object.keys(placeKinds)) delete placeKinds[code];
+        // The lists in your profile follow your LAST SEARCH on the site, so they can shrink (say you searched
+        // one building). Therefore we only add and update places, we never forget the ones seen before.
         Object.assign(deskNames, names);
         for (const code of Object.keys(names)) placeKinds[code] = deskIds.includes(Number(code)) ? "desk" : "room";
+        // Counts only, so you can see what the site gave us (look for this line in the console if a list is missing).
+        console.log(`[Desk Batch Booker] your profile lists ${deskIds.length} desk codes and ${roomIds.length} room codes; ${Object.keys(names).length} of them are bookable places`);
         saveDeskCache();
         refreshDeskList();
         refreshBookedDays(); // the session is known now, so we can ask for your bookings
@@ -906,7 +908,12 @@
         });
       const say = (text) => placeList.replaceChildren(el("div", { className: "hint empty", textContent: text }));
       if (Object.keys(deskNames).length === 0) return say("Loading your desks... (reload the page if this stays empty)");
-      if (places.length === 0) return say(filter || onlyFavouritesBox.checked ? `No ${noun()}s match.` : `No ${noun()}s found for your account.`);
+      if (places.length === 0) {
+        if (filter || onlyFavouritesBox.checked) return say(`No ${noun()}s match.`);
+        return say(mode === "room"
+          ? 'No rooms known yet. The site gives us this list when you use its own "Book a Room" search: open that once, then reload this page.'
+          : "No desks found for your account.");
+      }
 
       const scrolled = placeList.scrollTop; // keep your place in the list when a row changes
       placeList.replaceChildren(...places.map(([code]) => placeRow(code)));

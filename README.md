@@ -50,6 +50,7 @@ No git? Use the green **Code → Download ZIP** button on GitHub and unpack it. 
 - **Auto check-in** only works while a booking-site tab is open and logged in (it can be a background tab). Keep one pinned.
 - Chrome may show a "disable developer mode extensions" reminder at start-up: that is normal for unpacked extensions.
 - Panel missing or desks list stuck on "Loading your desks...": reload the page and click something on it once.
+- Rooms list empty? The site only tells the extension about your rooms through its own "Book a Room" search. Open that once, then reload. Open the browser console (F12) and look for the line `[Desk Batch Booker] your profile lists … room codes`: if it says 0 room codes, that is why.
 - Uninstall: `chrome://extensions` → **Remove**.
 
 ## Sharing with others
