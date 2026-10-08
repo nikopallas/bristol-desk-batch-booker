@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Desk Batch Booker",
-  "version": "1.0",
+  "version": "1.1",
   "description": "Book several days / tables on uob.smartway2book.com in one click.",
   "content_scripts": [
     {
