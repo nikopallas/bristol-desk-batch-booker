@@ -67,9 +67,11 @@
   // Desk names hardly ever change, so the last answer is kept (in this site's localStorage): the desk list
   // then shows up at once on the next visit, and is refreshed in the background.
   const DESK_CACHE_KEY = "deskBatchBooker.desks";
+  let placesScanned = false; // true once "Scan all desks and rooms" has run in this browser
   function loadDeskCache() {
     try {
       const saved = JSON.parse(localStorage.getItem(DESK_CACHE_KEY));
+      placesScanned = saved.scanned === true;
       for (const [code, name] of Object.entries(saved.names).slice(0, 3000)) {
         if (/^\d{1,6}$/.test(code) && typeof name === "string" && name.length <= 200) deskNames[code] = name;
       }
@@ -83,7 +85,7 @@
   }
   function saveDeskCache() {
     try {
-      localStorage.setItem(DESK_CACHE_KEY, JSON.stringify({ names: deskNames, timezones: deskTimezones, kinds: placeKinds }));
+      localStorage.setItem(DESK_CACHE_KEY, JSON.stringify({ names: deskNames, timezones: deskTimezones, kinds: placeKinds, scanned: placesScanned }));
     } catch {}
   }
   loadDeskCache();
@@ -220,6 +222,50 @@
       }
     });
     return names;
+  }
+
+  // Which of these codes are desks or rooms? Returns { code: "desk" | "room" }. The answer is heavy (every place
+  // comes with all its form fields), so ask for a few codes at a time. Resource types: 2 = desk, 1/9/10 = rooms
+  // (the same types the site's own "Book a Desk" and "Book a Room" searches use).
+  async function loadKinds(ids) {
+    requireSession();
+    const response = await originalFetch("/Services/LocationsWS.svc/GetLocations", {
+      method: "POST",
+      headers: { "content-type": "application/json", "smartway2-version": siteVersion },
+      body: JSON.stringify({ token: token, locationids: ids }),
+    });
+    forgetTokenIfRejected(response.status);
+    const text = await response.text();
+    if (!response.ok) throw new Error(`could not sort places: HTTP ${response.status}`);
+    const kinds = {};
+    for (const place of JSON.parse(text)) {
+      if (!Number.isInteger(place.id) || !Array.isArray(place.resourcetypes)) continue;
+      if (place.resourcetypes.includes(2)) kinds[place.id] = "desk";
+      else if (place.resourcetypes.some((type) => type === 1 || type === 9 || type === 10)) kinds[place.id] = "room";
+    }
+    return kinds;
+  }
+
+  // Walks through ALL codes once and keeps the desks and rooms it finds, so the list is complete no matter
+  // which filters your profile holds. Names come in bulk (cheap); only codes of unknown kind need the heavy call.
+  // report(text) shows progress. Returns how many desks and rooms are known afterwards.
+  async function scanAllPlaces(report) {
+    requireSession();
+    const highest = Math.max(1700, ...Object.keys(deskNames).map(Number)) + 500; // a bit beyond the codes seen so far
+    report("Scanning: looking up names...");
+    const names = await lookupNames(Array.from({ length: highest }, (_, i) => i + 1)); // codes without a place just come back empty
+    const unknown = Object.keys(names).map(Number).filter((id) => !placeKinds[id]);
+
+    for (let i = 0; i < unknown.length; i += 10) {
+      report(`Scanning: sorting desks and rooms... ${Math.min(i + 10, unknown.length)} of ${unknown.length}`);
+      Object.assign(placeKinds, await loadKinds(unknown.slice(i, i + 10)));
+      await sleep(PAUSE_BETWEEN_REQUESTS_MS);
+    }
+    for (const code of Object.keys(names)) if (placeKinds[code]) deskNames[code] = names[code]; // only desks and rooms are kept
+    placesScanned = true;
+    saveDeskCache();
+    const kinds = Object.values(placeKinds);
+    return { desks: kinds.filter((kind) => kind === "desk").length, rooms: kinds.filter((kind) => kind === "room").length };
   }
 
   // Name of one table, or null if it doesn't exist. Uses the list we already have if possible.
@@ -599,6 +645,14 @@
     const pickedSummary = el("div", { className: "hint picked" });
     const onlyFavouritesBox = el("input", { type: "checkbox" });
     const pickFavouritesButton = el("button", { className: "link", textContent: "Pick all favourites" });
+    // The scan runs once per browser: afterwards the button disappears and the result stays saved.
+    const scanButton = el("button", {
+      className: "link",
+      textContent: "Scan all desks and rooms (one time)",
+      hidden: placesScanned,
+      title: "Looks up every code on the site once, so the list is complete whatever your filters on the site are. Takes a minute or two.",
+    });
+    const scanNote = el("span", { className: "hint", textContent: "✓ All desks and rooms scanned", hidden: !placesScanned });
     const bookButton = el("button", { className: "primary", textContent: "Book all", title: "Books every picked desk on every picked day" });
     const checkButton = el("button", { textContent: "Check free", title: "Shows which desks are already taken. Books nothing." });
     const checkInButton = el("button", { className: "link", textContent: "Check in now", title: "Checks in everything that is open for check-in" });
@@ -629,7 +683,8 @@
       el("div", { className: "row between" }, el("label", { className: "chip" }, onlyFavouritesBox, "★ only"), pickFavouritesButton),
       placeList,
       el("div", { className: "hint", textContent: "Click to pick. Hover a row for ★ favourite and ✎ nickname." }),
-      pickedSummary);
+      pickedSummary,
+      el("div", { className: "row" }, scanButton, scanNote));
 
     const body = el("div", { className: "body" }); // everything except the header and status line, so minimising is one hidden flag
     body.append(
@@ -911,7 +966,7 @@
       if (places.length === 0) {
         if (filter || onlyFavouritesBox.checked) return say(`No ${noun()}s match.`);
         return say(mode === "room"
-          ? 'No rooms known yet. The site gives us this list when you use its own "Book a Room" search: open that once, then reload this page.'
+          ? 'No rooms known yet. Press "Scan all desks and rooms" below, or use the site\'s own "Book a Room" search once and reload this page.'
           : "No desks found for your account.");
       }
 
@@ -922,6 +977,28 @@
       if (editor) editor.focus();
     };
     deskFilter.oninput = onlyFavouritesBox.onchange = refreshDeskList;
+
+    let scanning = false;
+    scanButton.onclick = async (event) => {
+      if (!event.isTrusted || scanning) return;
+      if (!token || !userId) return log("Not connected to the site yet. Click something on the page once, then try again.", "fail");
+      scanning = true;
+      scanButton.disabled = true;
+      try {
+        const { desks, rooms } = await scanAllPlaces(setStatus);
+        log(`Scan done: ${desks} desks and ${rooms} rooms are known now (saved in this browser).`, "ok");
+        setStatus("");
+        refreshDeskList();
+      } catch (error) {
+        setStatus("");
+        log(`The scan stopped: ${redact(error)}. Try again in a moment.`, "fail");
+      } finally {
+        scanning = false;
+        scanButton.disabled = false;
+        scanButton.hidden = placesScanned; // done: no second run needed
+        scanNote.hidden = !placesScanned;
+      }
+    };
 
     pickFavouritesButton.onclick = () => {
       favourites.forEach((nickname, code) => placeKinds[code] === mode && pickedCodes.add(code)); // only places of this kind that exist
