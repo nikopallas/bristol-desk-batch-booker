@@ -64,28 +64,44 @@
   const timezoneOf = (tableId) => deskTimezones[tableId] || DEFAULT_TIMEZONE;
   let deskCountSeen = 0;
 
-  // Desk names hardly ever change, so the last answer is kept (in this site's localStorage): the desk list
-  // then shows up at once on the next visit, and is refreshed in the background.
+  // Places (desks and rooms) are remembered in three layers, later ones win:
+  //   1. the list shipped with the extension (places.js, the same for everybody, no personal data),
+  //   2. what this browser saved last time (the site's localStorage),
+  //   3. what the site tells us right now.
+  // That way the desk list shows up at once, and the list stays complete even if the site's filters are narrow.
   const DESK_CACHE_KEY = "deskBatchBooker.desks";
+  const SCAN_VERSION = 2; // raise it when the scan changes, so everybody's browser scans again
   let placesScanned = false; // true once "Scan all desks and rooms" has run in this browser
+
+  // Takes { names, timezones, kinds } from storage or places.js and keeps only well-formed entries.
+  function adoptPlaces(saved) {
+    for (const [code, name] of Object.entries(saved.names || {}).slice(0, 3000)) {
+      if (/^\d{1,6}$/.test(code) && typeof name === "string" && name.length <= 200) deskNames[code] = name;
+    }
+    for (const [code, zone] of Object.entries(saved.timezones || {}).slice(0, 3000)) {
+      if (/^\d{1,6}$/.test(code) && typeof zone === "string" && /^[\w .+-]{1,64}$/.test(zone)) deskTimezones[code] = zone;
+    }
+    for (const [code, kind] of Object.entries(saved.kinds || {}).slice(0, 3000)) {
+      if (/^\d{1,6}$/.test(code) && (kind === "desk" || kind === "room")) placeKinds[code] = kind;
+    }
+  }
   function loadDeskCache() {
     try {
+      const shipped = window.__DESK_BATCH_PLACES; // set by places.js, which runs just before this file
+      delete window.__DESK_BATCH_PLACES; // take it, and leave nothing on the page
+      if (shipped) adoptPlaces(shipped);
+    } catch {}
+    try {
       const saved = JSON.parse(localStorage.getItem(DESK_CACHE_KEY));
-      placesScanned = saved.scanned === true;
-      for (const [code, name] of Object.entries(saved.names).slice(0, 3000)) {
-        if (/^\d{1,6}$/.test(code) && typeof name === "string" && name.length <= 200) deskNames[code] = name;
-      }
-      for (const [code, zone] of Object.entries(saved.timezones).slice(0, 3000)) {
-        if (/^\d{1,6}$/.test(code) && typeof zone === "string" && /^[\w .+-]{1,64}$/.test(zone)) deskTimezones[code] = zone;
-      }
-      for (const [code, kind] of Object.entries(saved.kinds || {}).slice(0, 3000)) {
-        if (/^\d{1,6}$/.test(code) && (kind === "desk" || kind === "room")) placeKinds[code] = kind;
-      }
+      placesScanned = saved.scanVersion === SCAN_VERSION;
+      adoptPlaces(saved);
     } catch {} // nothing saved yet, or unreadable: we simply ask the site
   }
   function saveDeskCache() {
     try {
-      localStorage.setItem(DESK_CACHE_KEY, JSON.stringify({ names: deskNames, timezones: deskTimezones, kinds: placeKinds, scanned: placesScanned }));
+      localStorage.setItem(DESK_CACHE_KEY, JSON.stringify({
+        names: deskNames, timezones: deskTimezones, kinds: placeKinds, scanVersion: placesScanned ? SCAN_VERSION : 0,
+      }));
     } catch {}
   }
   loadDeskCache();
@@ -224,10 +240,33 @@
     return names;
   }
 
+  // The site groups its resource types in categories ("desk", "meeting-room", "parking-bay", ...).
+  // Every type in the category "desk" counts as a desk and every one in "meeting-room" as a room
+  // (that includes Training Rooms, Study Spaces, Specialist Spaces and so on).
+  let resourceCategories = null; // { typeId: category }, asked from the site once
+  async function loadResourceCategories() {
+    if (resourceCategories) return resourceCategories;
+    requireSession();
+    const response = await originalFetch("/Services/LocationsWS.svc/GetResourceTypes", {
+      method: "POST",
+      headers: { "content-type": "application/json", "smartway2-version": siteVersion },
+      body: JSON.stringify({ token: token }),
+    });
+    forgetTokenIfRejected(response.status);
+    const text = await response.text();
+    if (!response.ok) throw new Error(`could not load resource types: HTTP ${response.status}`);
+    const categories = {};
+    for (const type of JSON.parse(text)) {
+      if (Number.isInteger(type.id) && typeof type.resourcetypecategory === "string") categories[type.id] = type.resourcetypecategory;
+    }
+    resourceCategories = categories;
+    return categories;
+  }
+
   // Which of these codes are desks or rooms? Returns { code: "desk" | "room" }. The answer is heavy (every place
-  // comes with all its form fields), so ask for a few codes at a time. Resource types: 2 = desk, 1/9/10 = rooms
-  // (the same types the site's own "Book a Desk" and "Book a Room" searches use).
+  // comes with all its form fields), so ask for a few codes at a time.
   async function loadKinds(ids) {
+    const categories = await loadResourceCategories();
     requireSession();
     const response = await originalFetch("/Services/LocationsWS.svc/GetLocations", {
       method: "POST",
@@ -240,8 +279,8 @@
     const kinds = {};
     for (const place of JSON.parse(text)) {
       if (!Number.isInteger(place.id) || !Array.isArray(place.resourcetypes)) continue;
-      if (place.resourcetypes.includes(2)) kinds[place.id] = "desk";
-      else if (place.resourcetypes.some((type) => type === 1 || type === 9 || type === 10)) kinds[place.id] = "room";
+      if (place.resourcetypes.some((type) => categories[type] === "desk")) kinds[place.id] = "desk";
+      else if (place.resourcetypes.some((type) => categories[type] === "meeting-room")) kinds[place.id] = "room";
     }
     return kinds;
   }
@@ -266,6 +305,18 @@
     saveDeskCache();
     const kinds = Object.values(placeKinds);
     return { desks: kinds.filter((kind) => kind === "desk").length, rooms: kinds.filter((kind) => kind === "room").length };
+  }
+
+  // The text of a places.js file with everything we know about desks and rooms (see the note at the top of that file).
+  function placesFileText() {
+    const sorted = (map) => Object.fromEntries(Object.keys(map).filter((code) => placeKinds[code]).sort((a, b) => a - b).map((code) => [code, map[code]]));
+    const data = { names: sorted(deskNames), timezones: sorted(deskTimezones), kinds: sorted(placeKinds) };
+    return (
+      "// Known desks and rooms of the booking site: code -> name, timezone and kind.\n" +
+      "// Shipped with the extension so everybody starts with a full list. No personal data in here.\n" +
+      '// Regenerate it with "Codes & list export" in the panel after a full scan, then commit the downloaded file.\n' +
+      "window.__DESK_BATCH_PLACES = " + JSON.stringify(data, null, 1) + ";\n"
+    );
   }
 
   // Name of one table, or null if it doesn't exist. Uses the list we already have if possible.
@@ -652,6 +703,11 @@
       hidden: placesScanned,
       title: "Looks up every code on the site once, so the list is complete whatever your filters on the site are. Takes a minute or two.",
     });
+    const exportButton = el("button", {
+      className: "link",
+      textContent: "Download the list as places.js",
+      title: "Saves every desk and room this browser knows (codes and names only) as a file you can commit to the repo, so others start with a full list.",
+    });
     const scanNote = el("span", { className: "hint", textContent: "✓ All desks and rooms scanned", hidden: !placesScanned });
     const bookButton = el("button", { className: "primary", textContent: "Book all", title: "Books every picked desk on every picked day" });
     const checkButton = el("button", { textContent: "Check free", title: "Shows which desks are already taken. Books nothing." });
@@ -693,7 +749,7 @@
       section("Time (desk's local time)", el("div", { className: "row time" }, startInput, el("span", { className: "hint", textContent: "to" }), endInput)),
       placesSection,
       titleSection,
-      disclosure("Codes (filled in from your picks)", tablesInput),
+      disclosure("Codes & list export", tablesInput, el("div", { className: "row" }, exportButton)),
       el("div", { className: "actions" }, planSummary,
         el("div", { className: "row" }, checkButton, bookButton, stopButton, undoButton)),
       el("div", { className: "extras" }, checkInButton, el("span", { className: "hint", textContent: "Open check-ins are done automatically every minute while this page is open." })),
@@ -977,6 +1033,14 @@
       if (editor) editor.focus();
     };
     deskFilter.oninput = onlyFavouritesBox.onchange = refreshDeskList;
+
+    exportButton.onclick = (event) => {
+      if (!event.isTrusted) return;
+      const link = el("a", { href: URL.createObjectURL(new Blob([placesFileText()], { type: "text/javascript" })), download: "places.js" });
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+      log("places.js downloaded. Put it in the extension folder (replace the old one) and commit it.", "ok");
+    };
 
     let scanning = false;
     scanButton.onclick = async (event) => {

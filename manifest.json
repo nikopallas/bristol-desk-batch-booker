@@ -6,7 +6,7 @@
   "content_scripts": [
     {
       "matches": ["https://uob.smartway2book.com/*"],
-      "js": ["content.js"],
+      "js": ["places.js", "content.js"],
       "run_at": "document_start",
       "all_frames": false,
       "world": "MAIN"
