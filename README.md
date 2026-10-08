@@ -113,5 +113,8 @@ Desk or room is decided by the site's own resource categories (`desk` and `meeti
 Change the address under `"matches"` in `manifest.json` (e.g. `"https://yourorg.smartway2book.com/*"`) and reload the extension. It is untested outside the author's site: try **Check free** first.
 </details>
 
+## 💡 Ideas or bugs?
+[**Open an issue**](https://github.com/nikopallas/bristol-desk-batch-booker/issues/new/choose) and pick *Feature request* or *Bug report*. Please never paste your login token or a HAR file there: issues are public.
+
 ## License
 MIT, see [LICENSE](LICENSE). Provided as is, at your own risk.

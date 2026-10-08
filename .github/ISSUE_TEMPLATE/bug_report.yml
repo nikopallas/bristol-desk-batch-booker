@@ -1,0 +1,46 @@
+name: 🐞 Bug report
+description: Something does not work as expected
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Sorry about that! Please help us find it fast.
+        ⚠️ **Never paste your login token, HAR files, or screenshots/logs that show a long token-like string.** If in doubt, leave it out.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: And what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Switched to Rooms
+        2. Picked 3 days and room X
+        3. Pressed Book all
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: The red or amber lines from the panel's log
+      description: Copy the text of the log area at the bottom of the panel. Text only please.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The "version" in `manifest.json` (e.g. 1.2), or the release tag you installed.
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Desks or rooms?
+      options:
+        - Desks
+        - Rooms
+        - Both / not sure

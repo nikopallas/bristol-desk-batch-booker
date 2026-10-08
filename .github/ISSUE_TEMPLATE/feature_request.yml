@@ -1,0 +1,35 @@
+name: 💡 Feature request
+description: Suggest an idea or improvement
+title: "[Idea] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! This is a small hobby project, so no promises, but every idea is read.
+        Please do **not** paste login tokens, HAR files or screenshots that show them.
+  - type: textarea
+    id: wish
+    attributes:
+      label: What would you like to be able to do?
+      description: Describe it from your point of view, e.g. "I want to book the same desk every Tuesday for three months."
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why would it help?
+      description: What is annoying or slow today?
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it belong?
+      options:
+        - Desks
+        - Rooms
+        - Calendar / days
+        - Favourites and lists
+        - Check-in
+        - Something else
+    validations:
+      required: true
