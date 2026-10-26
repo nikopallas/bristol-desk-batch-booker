@@ -8,3 +8,4 @@
 *.crx
 *.log
 node_modules/
+build-firefox/

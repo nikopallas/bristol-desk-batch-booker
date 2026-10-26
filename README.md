@@ -13,6 +13,8 @@ git clone https://github.com/nikopallas/bristol-desk-batch-booker.git
 2. Click **Load unpacked** and pick the `bristol-desk-batch-booker` folder (keep the folder, Chrome reads it from there).
 3. Open the booking site, log in, and click around once. A panel appears bottom-right.
 
+🦊 *Using Firefox? Open the Firefox toggle below.*
+
 ## Use
 1. Pick **Desks** or **Rooms** (switch at the top).
 2. Click the **days** (click *Mo, Tu, …* to pick that weekday for the whole month).
@@ -39,6 +41,18 @@ git clone https://github.com/nikopallas/bristol-desk-batch-booker.git
 - 🛡 **Code check:** before anything is booked or checked, the picked codes are compared with the site's current names. If a code now means another place, nothing is booked and you pick again.
 - 🐢 **Gentle:** one booking at a time, slows down by itself if the site says "too many requests", stops after two failures in a row.
 - ➖ **Minimise** the panel with the **–** button; progress stays visible.
+</details>
+
+<details>
+<summary><b>🦊 Firefox</b></summary>
+
+Same code, a slightly different manifest. **Needs Firefox 128 or newer** (it relies on a feature added in 128). *Not yet tested by the author: please tell me how it goes.*
+
+1. In the project folder run `./make-firefox.sh` (Mac/Linux; it just copies three files into `build-firefox/`).
+2. In Firefox open `about:debugging` → **This Firefox** → **Load Temporary Add-on…** and pick `build-firefox/manifest.json`.
+3. Open the booking site, log in, click around once. If no panel appears: `about:addons` → *Desk Batch Booker* → **Permissions** → allow it on `uob.smartway2book.com`, then reload the page.
+
+Good to know: a temporary add-on is removed when Firefox closes, so repeat step 2 after a restart. A permanent install needs the add-on to be signed by Mozilla (free "unlisted" signing exists, not set up here). Firefox-based browsers such as Zen should work the same way.
 </details>
 
 <details>
@@ -110,7 +124,7 @@ Desk or room is decided by the site's own resource categories (`desk` and `meeti
 <details>
 <summary><b>🌍 Another Smartway2 site?</b></summary>
 
-Change the address under `"matches"` in `manifest.json` (e.g. `"https://yourorg.smartway2book.com/*"`) and reload the extension. It is untested outside the author's site: try **Check free** first.
+Change the address under `"matches"` in `manifest.json` (e.g. `"https://yourorg.smartway2book.com/*"`), and in `manifest.firefox.json` too (also its `host_permissions`), then reload the extension. It is untested outside the author's site: try **Check free** first.
 </details>
 
 ## 💡 Ideas or bugs?
