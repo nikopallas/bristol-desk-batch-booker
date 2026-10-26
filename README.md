@@ -46,13 +46,13 @@ git clone https://github.com/nikopallas/bristol-desk-batch-booker.git
 <details>
 <summary><b>🦊 Firefox</b></summary>
 
-Same code, a slightly different manifest. **Needs Firefox 140 or newer** (it relies on a feature added in 128, and the manifest uses a privacy declaration that 140 introduced). *The manifest passes Mozilla's own checker (`web-ext lint`: 0 errors, 0 warnings), but the author has not run it in a live Firefox yet: please tell me how it goes.*
+Same code, a slightly different manifest. **Needs Firefox 140 or newer** (it relies on a feature added in 128, and the manifest uses a privacy declaration that 140 introduced). *Tested by the author as a temporary add-on, and the manifest passes Mozilla's own checker (`web-ext lint`: 0 errors, 0 warnings). Something odd in Firefox? Open an issue.*
 
 1. In the project folder run `./make-firefox.sh` (Mac/Linux; it just copies three files into `build-firefox/`).
 2. In Firefox open `about:debugging` → **This Firefox** → **Load Temporary Add-on…** and pick `build-firefox/manifest.json`.
 3. Open the booking site, log in, click around once. If no panel appears: `about:addons` → *Desk Batch Booker* → **Permissions** → allow it on `uob.smartway2book.com`, then reload the page.
 
-Good to know: a temporary add-on is removed when Firefox closes, so repeat step 2 after a restart. A permanent install needs the add-on to be signed by Mozilla (free "unlisted" signing exists, not set up here). Firefox-based browsers such as Zen should work the same way.
+Good to know: a temporary add-on is removed when Firefox closes, so repeat step 2 after a restart. A permanent install needs the add-on to be signed by Mozilla (free "unlisted" signing exists, not set up here). Firefox-based browsers such as Zen should work the same way (untested).
 </details>
 
 <details>
