@@ -46,7 +46,7 @@ git clone https://github.com/nikopallas/bristol-desk-batch-booker.git
 <details>
 <summary><b>🦊 Firefox</b></summary>
 
-Same code, a slightly different manifest. **Needs Firefox 128 or newer** (it relies on a feature added in 128). *Not yet tested by the author: please tell me how it goes.*
+Same code, a slightly different manifest. **Needs Firefox 140 or newer** (it relies on a feature added in 128, and the manifest uses a privacy declaration that 140 introduced). *The manifest passes Mozilla's own checker (`web-ext lint`: 0 errors, 0 warnings), but the author has not run it in a live Firefox yet: please tell me how it goes.*
 
 1. In the project folder run `./make-firefox.sh` (Mac/Linux; it just copies three files into `build-firefox/`).
 2. In Firefox open `about:debugging` → **This Firefox** → **Load Temporary Add-on…** and pick `build-firefox/manifest.json`.
